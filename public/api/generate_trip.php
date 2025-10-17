@@ -54,5 +54,13 @@ try {
 
     respond(200, $itinerary);
 } catch (Throwable $exception) {
+    Logger::logThrowable($exception, [
+        'endpoint' => 'generate_trip',
+        'request_context' => [
+            'start_location' => $startLocation,
+            'departure_datetime' => $departureDatetime,
+            'city_of_interest' => $cityOfInterest,
+        ],
+    ]);
     respond(500, ['error' => $exception->getMessage()]);
 }

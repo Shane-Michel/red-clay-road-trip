@@ -17,9 +17,16 @@ function respond(int $status, array $data): void
     exit;
 }
 
+$rawInput = file_get_contents('php://input');
+
 try {
-    $input = json_decode(file_get_contents('php://input') ?: '[]', true, 512, JSON_THROW_ON_ERROR);
+    $input = json_decode($rawInput ?: '[]', true, 512, JSON_THROW_ON_ERROR);
 } catch (JsonException $exception) {
+    Logger::logThrowable($exception, [
+        'endpoint' => 'save_trip',
+        'stage' => 'decode_payload',
+        'raw_input' => $rawInput,
+    ]);
     respond(400, ['error' => 'Invalid JSON payload: ' . $exception->getMessage()]);
 }
 
@@ -34,5 +41,13 @@ try {
     $id = TripRepository::saveTrip($input);
     respond(201, ['id' => $id]);
 } catch (Throwable $exception) {
+    Logger::logThrowable($exception, [
+        'endpoint' => 'save_trip',
+        'request_context' => [
+            'start_location' => $input['start_location'] ?? null,
+            'departure_datetime' => $input['departure_datetime'] ?? null,
+            'city_of_interest' => $input['city_of_interest'] ?? null,
+        ],
+    ]);
     respond(500, ['error' => $exception->getMessage()]);
 }
