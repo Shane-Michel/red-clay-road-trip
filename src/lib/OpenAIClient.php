@@ -9,7 +9,10 @@ class OpenAIClient
 
     public function __construct(?string $apiKey = null, string $model = 'gpt-4.1-mini')
     {
-        $apiKey ??= getenv('OPENAI_API_KEY') ?: '';
+        if ($apiKey === null) {
+            $envApiKey = getenv('OPENAI_API_KEY');
+            $apiKey = $envApiKey ? (string) $envApiKey : '';
+        }
         if ($apiKey === '') {
             throw new RuntimeException('OPENAI_API_KEY is not set.');
         }
