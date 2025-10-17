@@ -12,7 +12,7 @@ Red Clay Road Trip is a single-page web experience that builds an AI-assisted hi
 
 ### Requirements
 
-- PHP 8.2+ with the `curl` and `sqlite3` extensions enabled
+- PHP 7.4.33 with the `curl`, `json`, and `sqlite3` extensions enabled
 - Composer (optional, not required)
 - An OpenAI API key with access to the `responses` endpoint
 
