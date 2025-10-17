@@ -1,5 +1,6 @@
 <?php
 $rootPath = dirname(__DIR__);
+require_once $rootPath . '/src/bootstrap.php';
 require_once $rootPath . '/src/lib/OpenAIClient.php';
 require_once $rootPath . '/src/lib/TripRepository.php';
 
