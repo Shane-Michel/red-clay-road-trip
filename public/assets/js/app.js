@@ -17,15 +17,42 @@ async function fetchJSON(url, options) {
 function renderItinerary(itinerary) {
     itineraryContainer.innerHTML = '';
 
+    if (!itinerary || typeof itinerary !== 'object') {
+        itineraryContainer.innerHTML = '<p class="error">Unable to display the itinerary at this time.</p>';
+        resultsSection.hidden = false;
+        saveButton.disabled = true;
+        delete saveButton.dataset.itineraryPayload;
+        delete saveButton.dataset.itineraryId;
+        return;
+    }
+
+    if (typeof itinerary.error === 'string' && itinerary.error.trim() !== '') {
+        itineraryContainer.innerHTML = `<p class="error">${itinerary.error}</p>`;
+        resultsSection.hidden = false;
+        saveButton.disabled = true;
+        delete saveButton.dataset.itineraryPayload;
+        delete saveButton.dataset.itineraryId;
+        return;
+    }
+
     const intro = document.createElement('div');
     intro.className = 'itinerary-intro';
     intro.innerHTML = `
-        <p><strong>Route:</strong> ${itinerary.route_overview}</p>
-        <p><strong>Total Travel Time:</strong> ${itinerary.total_travel_time}</p>
+        <p><strong>Route:</strong> ${itinerary.route_overview ?? '—'}</p>
+        <p><strong>Total Travel Time:</strong> ${itinerary.total_travel_time ?? '—'}</p>
     `;
     itineraryContainer.appendChild(intro);
 
-    itinerary.stops.forEach((stop, index) => {
+    const stops = Array.isArray(itinerary.stops) ? itinerary.stops : [];
+
+    if (!stops.length) {
+        const emptyMessage = document.createElement('p');
+        emptyMessage.className = 'error';
+        emptyMessage.textContent = 'No stops were provided for this itinerary.';
+        itineraryContainer.appendChild(emptyMessage);
+    }
+
+    stops.forEach((stop, index) => {
         const article = document.createElement('article');
         article.className = 'itinerary-stop';
         article.innerHTML = `
@@ -95,7 +122,11 @@ form.addEventListener('submit', async (event) => {
             body: formData,
         });
         renderItinerary(itinerary);
-        saveButton.dataset.itineraryPayload = JSON.stringify(itinerary);
+        if (itinerary && typeof itinerary === 'object') {
+            saveButton.dataset.itineraryPayload = JSON.stringify(itinerary);
+        } else {
+            delete saveButton.dataset.itineraryPayload;
+        }
     } catch (error) {
         itineraryContainer.innerHTML = `<p class="error">${error.message || 'Something went wrong while generating your trip.'}</p>`;
         resultsSection.hidden = false;
@@ -143,7 +174,11 @@ historyList.addEventListener('click', async (event) => {
     try {
         const itinerary = await fetchJSON(`api/get_trip.php?id=${encodeURIComponent(tripId)}`);
         renderItinerary(itinerary);
-        saveButton.dataset.itineraryPayload = JSON.stringify(itinerary);
+        if (itinerary && typeof itinerary === 'object') {
+            saveButton.dataset.itineraryPayload = JSON.stringify(itinerary);
+        } else {
+            delete saveButton.dataset.itineraryPayload;
+        }
     } catch (error) {
         itineraryContainer.innerHTML = `<p class="error">${error.message || 'Unable to load itinerary.'}</p>`;
         resultsSection.hidden = false;
