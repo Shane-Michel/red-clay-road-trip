@@ -48,9 +48,9 @@ class OpenAIClient
                     $payload['traveler_preferences'] ?? 'None provided'
                 )],
             ],
-            'response_format' => [
-                'type' => 'json_schema',
-                'json_schema' => [
+            'text' => [
+                'format' => [
+                    'type' => 'json_schema',
                     'name' => 'historical_road_trip',
                     'schema' => $this->schema(),
                 ],
@@ -164,32 +164,46 @@ class OpenAIClient
         return [
             '$schema' => 'http://json-schema.org/draft-07/schema#',
             'type' => 'object',
-            'required' => ['route_overview', 'total_travel_time', 'stops'],
+            'additionalProperties' => false,
             'properties' => [
-                'route_overview' => ['type' => 'string'],
-                'total_travel_time' => ['type' => 'string'],
-                'summary' => ['type' => 'string'],
-                'additional_tips' => ['type' => 'string'],
-                'start_location' => ['type' => 'string'],
-                'departure_datetime' => ['type' => 'string'],
-                'city_of_interest' => ['type' => 'string'],
-                'traveler_preferences' => ['type' => 'string'],
+                'route_overview'        => ['type' => 'string'],
+                'total_travel_time'     => ['type' => 'string'],
+                'summary'               => ['type' => 'string'],
+                'additional_tips'       => ['type' => 'string'],
+                'start_location'        => ['type' => 'string'],
+                'departure_datetime'    => ['type' => 'string'],
+                'city_of_interest'      => ['type' => 'string'],
+                'traveler_preferences'  => ['type' => 'string'],
                 'stops' => [
                     'type' => 'array',
                     'minItems' => 3,
                     'items' => [
                         'type' => 'object',
-                        'required' => ['title', 'address', 'duration', 'description', 'historical_note', 'challenge'],
+                        'additionalProperties' => false,
                         'properties' => [
-                            'title' => ['type' => 'string'],
-                            'address' => ['type' => 'string'],
-                            'duration' => ['type' => 'string'],
-                            'description' => ['type' => 'string'],
+                            'title'           => ['type' => 'string'],
+                            'address'         => ['type' => 'string'],
+                            'duration'        => ['type' => 'string'],
+                            'description'     => ['type' => 'string'],
                             'historical_note' => ['type' => 'string'],
-                            'challenge' => ['type' => 'string'],
+                            'challenge'       => ['type' => 'string'],
+                        ],
+                        'required' => [
+                            'title','address','duration','description','historical_note','challenge'
                         ],
                     ],
                 ],
+            ],
+            'required' => [
+                'route_overview',
+                'total_travel_time',
+                'summary',
+                'additional_tips',
+                'start_location',
+                'departure_datetime',
+                'city_of_interest',
+                'traveler_preferences',
+                'stops'
             ],
         ];
     }
