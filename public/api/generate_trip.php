@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 header('Content-Type: application/json');
 
-require_once __DIR__ . '/../lib/OpenAIClient.php';
+require_once dirname(__DIR__, 2) . '/src/lib/OpenAIClient.php';
 
 function respond(int $status, array $data): void
 {

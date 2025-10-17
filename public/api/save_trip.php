@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 header('Content-Type: application/json');
 
-require_once __DIR__ . '/../lib/TripRepository.php';
+require_once dirname(__DIR__, 2) . '/src/lib/TripRepository.php';
 
 TripRepository::initialize();
 
