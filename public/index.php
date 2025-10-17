@@ -1,8 +1,10 @@
 <?php
-$rootPath = dirname(__DIR__);
-require_once $rootPath . '/src/bootstrap.php';
-require_once $rootPath . '/src/lib/OpenAIClient.php';
-require_once $rootPath . '/src/lib/TripRepository.php';
+
+declare(strict_types=1);
+
+require_once dirname(__DIR__) . '/src/bootstrap.php';
+require_once dirname(__DIR__) . '/src/lib/OpenAIClient.php';
+require_once dirname(__DIR__) . '/src/lib/TripRepository.php';
 
 // Ensure database is initialized
 TripRepository::initialize();
@@ -27,7 +29,7 @@ TripRepository::initialize();
         <section class="planner" aria-labelledby="planner-title">
             <div class="planner__intro">
                 <h2 id="planner-title">Plan Your Historical Adventure</h2>
-                <p>Enter your starting point, when you&apos;re traveling, and the city you want to explore. Our AI historian will craft a road trip filled with intriguing stops and history-rich discoveries.</p>
+                <p>Enter your starting point, when you're traveling, and the city you want to explore. Our AI historian will craft a road trip filled with intriguing stops and history-rich discoveries.</p>
             </div>
             <form id="trip-form" class="planner__form" autocomplete="off">
                 <div class="field">

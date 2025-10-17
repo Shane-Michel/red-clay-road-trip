@@ -1,0 +1,11 @@
+{
+    "name": "vlucas/phpdotenv",
+    "description": "Loads environment variables from .env",
+    "version": "5.6.0",
+    "type": "library",
+    "autoload": {
+        "psr-4": {
+            "Dotenv\\": "src/"
+        }
+    }
+}

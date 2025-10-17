@@ -1,0 +1,20 @@
+{
+    "name": "redclay/road-trip",
+    "description": "Red Clay Road Trip application",
+    "type": "project",
+    "require": {
+        "php": "^7.4 || ^8.0",
+        "vlucas/phpdotenv": "^5.6"
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "packages/vlucas/phpdotenv"
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "RedClay\\": "src/"
+        }
+    }
+}

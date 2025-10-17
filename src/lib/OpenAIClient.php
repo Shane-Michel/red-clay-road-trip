@@ -15,16 +15,15 @@ class OpenAIClient
     public function __construct(?string $apiKey = null, string $model = 'gpt-4.1-mini')
     {
         if ($apiKey === null) {
-            $envApiKey = getenv('OPENAI_API_KEY');
-            $apiKey = $envApiKey ? (string) $envApiKey : '';
+            $apiKey = $this->readFromEnvironment('OPENAI_API_KEY');
         }
         if ($apiKey === '') {
             throw new RuntimeException('OPENAI_API_KEY is not set.');
         }
 
         $this->apiKey = $apiKey;
-        $configuredModel = getenv('OPENAI_MODEL');
-        if (is_string($configuredModel) && $configuredModel !== '') {
+        $configuredModel = $this->readFromEnvironment('OPENAI_MODEL');
+        if ($configuredModel !== '') {
             $model = $configuredModel;
         }
 
@@ -72,7 +71,24 @@ class OpenAIClient
             throw $exception;
         }
 
-        return $response['output'][0]['content'][0]['text'] ?? [];
+        $text = $response['output'][0]['content'][0]['text'] ?? null;
+        if (!is_string($text) || trim($text) === '') {
+            return [];
+        }
+
+        try {
+            /** @var array<string, mixed> $decoded */
+            $decoded = json_decode($text, true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable $exception) {
+            Logger::logThrowable($exception, [
+                'client_method' => __METHOD__,
+                'stage' => 'decode_itinerary',
+            ]);
+
+            throw new RuntimeException('Unable to decode itinerary payload.', 0, $exception);
+        }
+
+        return $decoded;
     }
 
     /**
@@ -100,6 +116,8 @@ class OpenAIClient
                 'Authorization: Bearer ' . $this->apiKey,
             ],
             CURLOPT_POSTFIELDS => $encodedBody,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 60,
         ]);
 
         $raw = curl_exec($ch);
@@ -174,5 +192,23 @@ class OpenAIClient
                 ],
             ],
         ];
+    }
+
+    private function readFromEnvironment(string $key): string
+    {
+        if (isset($_ENV[$key]) && $_ENV[$key] !== '') {
+            return (string) $_ENV[$key];
+        }
+
+        if (isset($_SERVER[$key]) && $_SERVER[$key] !== '') {
+            return (string) $_SERVER[$key];
+        }
+
+        $value = getenv($key);
+        if ($value === false) {
+            return '';
+        }
+
+        return (string) $value;
     }
 }

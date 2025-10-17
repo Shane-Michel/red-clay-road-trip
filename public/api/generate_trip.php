@@ -2,11 +2,10 @@
 
 declare(strict_types=1);
 
-header('Content-Type: application/json');
+require_once dirname(__DIR__, 2) . '/src/bootstrap.php';
+require_once dirname(__DIR__, 2) . '/src/lib/OpenAIClient.php';
 
-$rootPath = dirname(__DIR__, 2);
-require_once $rootPath . '/src/bootstrap.php';
-require_once $rootPath . '/src/lib/OpenAIClient.php';
+header('Content-Type: application/json');
 
 function respond(int $status, array $data): void
 {
@@ -26,33 +25,14 @@ if ($startLocation === '' || $departureDatetime === '' || $cityOfInterest === ''
 
 try {
     $client = new OpenAIClient();
-    $raw = $client->generateItinerary([
+    $itinerary = $client->generateItinerary([
         'start_location' => $startLocation,
         'departure_datetime' => $departureDatetime,
         'city_of_interest' => $cityOfInterest,
         'traveler_preferences' => $preferences,
     ]);
 
-    if (is_string($raw)) {
-        $itinerary = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
-    } else {
-        $itinerary = $raw;
-    }
-
-    if (!is_array($itinerary) || empty($itinerary['stops'])) {
-        throw new RuntimeException('Incomplete itinerary received from OpenAI.');
-    }
-
-    $itinerary['start_location'] = $startLocation;
-    $itinerary['departure_datetime'] = $departureDatetime;
-    $itinerary['city_of_interest'] = $cityOfInterest;
-    $itinerary['traveler_preferences'] = $preferences;
-
-    if (!isset($itinerary['summary'])) {
-        $itinerary['summary'] = sprintf('Road trip from %s to explore %s.', $startLocation, $cityOfInterest);
-    }
-
-    respond(200, $itinerary);
+    respond(200, ['data' => $itinerary]);
 } catch (Throwable $exception) {
     Logger::logThrowable($exception, [
         'endpoint' => 'generate_trip',
@@ -62,5 +42,6 @@ try {
             'city_of_interest' => $cityOfInterest,
         ],
     ]);
+
     respond(500, ['error' => $exception->getMessage()]);
 }

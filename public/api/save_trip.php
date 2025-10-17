@@ -2,11 +2,10 @@
 
 declare(strict_types=1);
 
-header('Content-Type: application/json');
+require_once dirname(__DIR__, 2) . '/src/bootstrap.php';
+require_once dirname(__DIR__, 2) . '/src/lib/TripRepository.php';
 
-$rootPath = dirname(__DIR__, 2);
-require_once $rootPath . '/src/bootstrap.php';
-require_once $rootPath . '/src/lib/TripRepository.php';
+header('Content-Type: application/json');
 
 TripRepository::initialize();
 
@@ -43,11 +42,8 @@ try {
 } catch (Throwable $exception) {
     Logger::logThrowable($exception, [
         'endpoint' => 'save_trip',
-        'request_context' => [
-            'start_location' => $input['start_location'] ?? null,
-            'departure_datetime' => $input['departure_datetime'] ?? null,
-            'city_of_interest' => $input['city_of_interest'] ?? null,
-        ],
+        'payload' => $input,
     ]);
+
     respond(500, ['error' => $exception->getMessage()]);
 }
