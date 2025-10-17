@@ -27,6 +27,10 @@ try {
 
     echo json_encode($trip, JSON_PRETTY_PRINT);
 } catch (Throwable $exception) {
+    Logger::logThrowable($exception, [
+        'endpoint' => 'get_trip',
+        'trip_id' => $id,
+    ]);
     http_response_code(500);
     echo json_encode(['error' => $exception->getMessage()]);
 }

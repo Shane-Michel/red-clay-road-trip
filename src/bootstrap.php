@@ -2,8 +2,12 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/lib/Logger.php';
+
 (static function (): void {
     $rootPath = dirname(__DIR__);
+
+    Logger::setup();
 
     if (!isset($_ENV) || !is_array($_ENV)) {
         $_ENV = [];

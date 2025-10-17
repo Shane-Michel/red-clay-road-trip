@@ -1,5 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
+require_once __DIR__ . '/Logger.php';
+
+
 class OpenAIClient
 {
     /** @var string */
@@ -32,21 +37,17 @@ class OpenAIClient
      */
     public function generateItinerary(array $payload): array
     {
-        $systemPrompt = 'You are a travel historian who designs detailed, accessible scavenger hunts for road trips.';
-
-        $userPrompt = sprintf(
-            "Plan a historical road trip scavenger hunt.\n\nStart location: %s\nDeparture: %s\nCity of interest: %s\nPreferences: %s\n\nProvide an overview, driving segments, 4-6 stops with history challenges, travel tips, and accessibility notes.",
-            $payload['start_location'],
-            $payload['departure_datetime'],
-            $payload['city_of_interest'],
-            $payload['traveler_preferences'] ?? 'None provided'
-        );
-
-        $response = $this->request([
+        $requestBody = [
             'model' => $this->model,
             'input' => [
-                ['role' => 'system', 'content' => $systemPrompt],
-                ['role' => 'user', 'content' => $userPrompt],
+                ['role' => 'system', 'content' => 'You are a travel historian who designs detailed, accessible scavenger hunts for road trips.'],
+                ['role' => 'user', 'content' => sprintf(
+                    "Plan a historical road trip scavenger hunt.\n\nStart location: %s\nDeparture: %s\nCity of interest: %s\nPreferences: %s\n\nProvide an overview, driving segments, 4-6 stops with history challenges, travel tips, and accessibility notes.",
+                    $payload['start_location'],
+                    $payload['departure_datetime'],
+                    $payload['city_of_interest'],
+                    $payload['traveler_preferences'] ?? 'None provided'
+                )],
             ],
             'response_format' => [
                 'type' => 'json_schema',
@@ -55,7 +56,21 @@ class OpenAIClient
                     'schema' => $this->schema(),
                 ],
             ],
-        ]);
+        ];
+
+        try {
+            $response = $this->request($requestBody);
+        } catch (Throwable $exception) {
+            Logger::logThrowable($exception, [
+                'client_method' => __METHOD__,
+                'request_context' => [
+                    'start_location' => $payload['start_location'] ?? null,
+                    'departure_datetime' => $payload['departure_datetime'] ?? null,
+                    'city_of_interest' => $payload['city_of_interest'] ?? null,
+                ],
+            ]);
+            throw $exception;
+        }
 
         return $response['output'][0]['content'][0]['text'] ?? [];
     }
@@ -67,6 +82,16 @@ class OpenAIClient
     private function request(array $body): array
     {
         $ch = curl_init('https://api.openai.com/v1/responses');
+        try {
+            $encodedBody = json_encode($body, JSON_THROW_ON_ERROR);
+        } catch (Throwable $exception) {
+            Logger::logThrowable($exception, [
+                'client_method' => __METHOD__,
+                'stage' => 'encode_request',
+            ]);
+            throw $exception;
+        }
+
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
             CURLOPT_RETURNTRANSFER => true,
@@ -74,19 +99,39 @@ class OpenAIClient
                 'Content-Type: application/json',
                 'Authorization: Bearer ' . $this->apiKey,
             ],
-            CURLOPT_POSTFIELDS => json_encode($body, JSON_THROW_ON_ERROR),
+            CURLOPT_POSTFIELDS => $encodedBody,
         ]);
 
         $raw = curl_exec($ch);
         if ($raw === false) {
-            throw new RuntimeException('Failed to contact OpenAI: ' . curl_error($ch));
+            $errorMessage = 'Failed to contact OpenAI: ' . curl_error($ch);
+            Logger::log($errorMessage, [
+                'client_method' => __METHOD__,
+            ]);
+            curl_close($ch);
+            throw new RuntimeException($errorMessage);
         }
 
         $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         curl_close($ch);
 
-        $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        try {
+            $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable $exception) {
+            Logger::logThrowable($exception, [
+                'client_method' => __METHOD__,
+                'stage' => 'decode_response',
+                'status' => $status,
+            ]);
+            throw $exception;
+        }
+
         if ($status >= 400) {
+            Logger::log('OpenAI API error', [
+                'client_method' => __METHOD__,
+                'status' => $status,
+                'response' => $decoded,
+            ]);
             throw new RuntimeException('OpenAI API error: ' . ($decoded['error']['message'] ?? 'Unknown error'));
         }
 
