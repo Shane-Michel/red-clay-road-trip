@@ -1,0 +1,27 @@
+# Dependencies
+vendor/
+node_modules/
+
+# Environment files
+.env
+.env.local
+
+# IDE/editor settings
+.idea/
+.vscode/
+*.code-workspace
+
+# System files
+.DS_Store
+Thumbs.db
+
+# SQLite database and temp files
+data/*.sqlite
+data/*.sqlite-journal
+
+# Logs and cache
+*.log
+cache/
+
+# PHP server artifacts
+*.pid
