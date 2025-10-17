@@ -59,6 +59,10 @@ The first request will automatically create the SQLite database at `data/trips.s
 - All dates are stored in UTC ISO-8601 format for consistency.
 - Front-end code is located in `assets/js/app.js` and `assets/css/style.css`.
 
+## Deployment
+
+- Run `npm run deploy` to sync the project files to the production server using the configured `rsync` command.
+
 ## License
 
 This project is provided as-is for demonstration purposes.
