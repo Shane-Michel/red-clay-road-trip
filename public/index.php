@@ -1,6 +1,7 @@
 <?php
-require_once __DIR__ . '/lib/OpenAIClient.php';
-require_once __DIR__ . '/lib/TripRepository.php';
+$rootPath = dirname(__DIR__);
+require_once $rootPath . '/src/lib/OpenAIClient.php';
+require_once $rootPath . '/src/lib/TripRepository.php';
 
 // Ensure database is initialized
 TripRepository::initialize();

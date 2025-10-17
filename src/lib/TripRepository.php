@@ -2,7 +2,7 @@
 
 class TripRepository
 {
-    private const DB_PATH = __DIR__ . '/../data/trips.sqlite';
+    private const DB_PATH = __DIR__ . '/../../data/trips.sqlite';
 
     public static function initialize(): void
     {
@@ -72,6 +72,13 @@ class TripRepository
         static $pdo = null;
         if ($pdo instanceof PDO) {
             return $pdo;
+        }
+
+        $dbDirectory = dirname(self::DB_PATH);
+        if (!is_dir($dbDirectory)) {
+            if (!mkdir($dbDirectory, 0775, true) && !is_dir($dbDirectory)) {
+                throw new RuntimeException('Unable to create database directory: ' . $dbDirectory);
+            }
         }
 
         $pdo = new PDO('sqlite:' . self::DB_PATH);
