@@ -13,6 +13,11 @@ class OpenAIClient
         }
 
         $this->apiKey = $apiKey;
+        $configuredModel = getenv('OPENAI_MODEL');
+        if (is_string($configuredModel) && $configuredModel !== '') {
+            $model = $configuredModel;
+        }
+
         $this->model = $model;
     }
 
