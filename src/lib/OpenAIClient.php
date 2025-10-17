@@ -48,8 +48,8 @@ class OpenAIClient
                     $payload['traveler_preferences'] ?? 'None provided'
                 )],
             ],
-            'text' => [
-                'format' => 'json_schema',
+            'response_format' => [
+                'type' => 'json_schema',
                 'json_schema' => [
                     'name' => 'historical_road_trip',
                     'schema' => $this->schema(),
