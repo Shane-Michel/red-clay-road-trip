@@ -13,16 +13,22 @@ Red Clay Road Trip is a single-page web experience that builds an AI-assisted hi
 ### Requirements
 
 - PHP 7.4.33 with the `curl`, `json`, and `sqlite3` extensions enabled
-- Composer (optional, not required)
+- Composer 2.x
 - An OpenAI API key with access to the `responses` endpoint
 
 ### Installation
 
-1. Clone the repository and install dependencies (if any).
-2. Copy `.env.example` (if you create one) or export your API key directly before starting the server:
+1. Clone the repository and install PHP dependencies:
 
    ```bash
-   export OPENAI_API_KEY="sk-..."
+   composer install
+   ```
+
+2. Copy `.env.example` to `.env` and update it with your credentials, or export your API key directly before starting the server:
+
+   ```bash
+   cp .env.example .env
+   # then edit .env to include OPENAI_API_KEY
    ```
 
 3. Start PHP&apos;s development server from the project root:

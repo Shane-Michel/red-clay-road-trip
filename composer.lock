@@ -1,0 +1,40 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "0923df6b2295aba7a17b7f19298a67f5",
+    "packages": [
+        {
+            "name": "vlucas/phpdotenv",
+            "version": "5.6.0",
+            "dist": {
+                "type": "path",
+                "url": "packages/vlucas/phpdotenv",
+                "reference": "4802212d5778063b6368b9bf94857f036552de04"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Dotenv\\": "src/"
+                }
+            },
+            "description": "Loads environment variables from .env",
+            "transport-options": {
+                "relative": true
+            }
+        }
+    ],
+    "packages-dev": [],
+    "aliases": [],
+    "minimum-stability": "stable",
+    "stability-flags": {},
+    "prefer-stable": false,
+    "prefer-lowest": false,
+    "platform": {
+        "php": "^7.4 || ^8.0"
+    },
+    "platform-dev": {},
+    "plugin-api-version": "2.6.0"
+}

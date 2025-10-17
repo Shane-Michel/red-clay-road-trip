@@ -2,11 +2,10 @@
 
 declare(strict_types=1);
 
-header('Content-Type: application/json');
+require_once dirname(__DIR__, 2) . '/src/bootstrap.php';
+require_once dirname(__DIR__, 2) . '/src/lib/TripRepository.php';
 
-$rootPath = dirname(__DIR__, 2);
-require_once $rootPath . '/src/bootstrap.php';
-require_once $rootPath . '/src/lib/TripRepository.php';
+header('Content-Type: application/json');
 
 TripRepository::initialize();
 
