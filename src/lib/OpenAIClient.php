@@ -2,8 +2,10 @@
 
 class OpenAIClient
 {
-    private string $apiKey;
-    private string $model;
+    /** @var string */
+    private $apiKey;
+    /** @var string */
+    private $model;
 
     public function __construct(?string $apiKey = null, string $model = 'gpt-4.1-mini')
     {
