@@ -4,6 +4,214 @@ const itineraryContainer = document.getElementById('itinerary');
 const saveButton = document.getElementById('save-trip');
 const historyList = document.getElementById('history-list');
 const historyTemplate = document.getElementById('history-item-template');
+const mapElement = document.getElementById('map');
+const mapMessage = document.getElementById('map-message');
+
+let mapInstance = null;
+let mapMarkers = [];
+let routeLayer = null;
+const geocodeCache = new Map();
+
+function setMapMessage(text) {
+  if (!mapMessage) return;
+  if (!text) {
+    mapMessage.textContent = '';
+    mapMessage.hidden = true;
+    return;
+  }
+  mapMessage.textContent = text;
+  mapMessage.hidden = false;
+}
+
+function ensureMap() {
+  if (!mapElement || typeof L === 'undefined') {
+    return null;
+  }
+
+  if (mapInstance) {
+    return mapInstance;
+  }
+
+  mapInstance = L.map(mapElement, {
+    zoomControl: true,
+    scrollWheelZoom: false,
+  });
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19,
+  }).addTo(mapInstance);
+
+  // Default view over the southeastern US, adjust once coordinates load
+  mapInstance.setView([33.5207, -86.8025], 6);
+
+  return mapInstance;
+}
+
+function resetMap(message = '') {
+  if (mapInstance) {
+    mapMarkers.forEach((marker) => marker.remove());
+    mapMarkers = [];
+    if (routeLayer) {
+      routeLayer.remove();
+      routeLayer = null;
+    }
+  }
+
+  if (message) {
+    setMapMessage(message);
+  } else {
+    setMapMessage('');
+  }
+}
+
+async function geocodeLocation(query) {
+  const trimmed = (query || '').trim();
+  if (!trimmed) return null;
+
+  if (geocodeCache.has(trimmed)) {
+    return geocodeCache.get(trimmed);
+  }
+
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(trimmed)}`;
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Accept-Language': 'en',
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Geocoding failed with status ${response.status}`);
+    }
+    const data = await response.json();
+    const match = Array.isArray(data) && data.length ? data[0] : null;
+    const lat = match ? Number.parseFloat(match.lat) : null;
+    const lon = match ? Number.parseFloat(match.lon) : null;
+    const valid = Number.isFinite(lat) && Number.isFinite(lon);
+    const coords = valid ? {
+      lat,
+      lon,
+      name: match.display_name || trimmed,
+    } : null;
+    geocodeCache.set(trimmed, coords);
+    return coords;
+  } catch (error) {
+    console.warn('Geocoding error for', trimmed, error);
+    geocodeCache.set(trimmed, null);
+    return null;
+  }
+}
+
+async function fetchRoute(points) {
+  if (!Array.isArray(points) || points.length < 2) {
+    return null;
+  }
+
+  const coords = points
+    .map((point) => `${point.coords.lon},${point.coords.lat}`)
+    .join(';');
+
+  const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`; // eslint-disable-line max-len
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Routing failed with status ${response.status}`);
+    }
+    const data = await response.json();
+    if (!data.routes || !data.routes.length) {
+      return null;
+    }
+    const geometry = data.routes[0].geometry;
+    if (!geometry || !Array.isArray(geometry.coordinates)) {
+      return null;
+    }
+    return geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+  } catch (error) {
+    console.warn('Routing error', error);
+    return null;
+  }
+}
+
+async function updateMap(trip) {
+  if (!mapElement) return;
+
+  if (typeof L === 'undefined') {
+    setMapMessage('Map preview unavailable because the map library could not be loaded.');
+    return;
+  }
+
+  const map = ensureMap();
+  if (!map) {
+    setMapMessage('Map preview unavailable for this itinerary.');
+    return;
+  }
+
+  resetMap('Plotting your road trip...');
+
+  const points = [];
+  if (trip.start_location) {
+    points.push({
+      label: 'Start',
+      description: trip.start_location,
+    });
+  }
+
+  trip.stops.forEach((stop, index) => {
+    const stopLabel = `Stop ${index + 1}: ${stop.title || stop.address || 'Scheduled stop'}`;
+    const lookup = stop.address || stop.title || trip.city_of_interest || '';
+    points.push({
+      label: stopLabel,
+      description: lookup,
+    });
+  });
+
+  if (!points.length) {
+    resetMap('Map preview unavailable for this itinerary.');
+    return;
+  }
+
+  const resolved = [];
+  for (const point of points) {
+    // eslint-disable-next-line no-await-in-loop
+    const coords = await geocodeLocation(point.description);
+    if (coords) {
+      resolved.push({ ...point, coords });
+    }
+  }
+
+  if (!resolved.length) {
+    resetMap('Map preview unavailable for this itinerary.');
+    return;
+  }
+
+  setMapMessage('');
+
+  mapMarkers = resolved.map((point) => {
+    const marker = L.marker([point.coords.lat, point.coords.lon], { title: point.label }).addTo(map);
+    marker.bindPopup(`<strong>${point.label}</strong><br>${point.description}`);
+    return marker;
+  });
+
+  const bounds = L.latLngBounds(resolved.map((point) => [point.coords.lat, point.coords.lon]));
+  map.fitBounds(bounds, { padding: [24, 24] });
+
+  const route = await fetchRoute(resolved);
+  if (route && route.length) {
+    routeLayer = L.polyline(route, {
+      color: '#c3562d',
+      weight: 4,
+      opacity: 0.85,
+      lineJoin: 'round',
+    }).addTo(map);
+    map.fitBounds(routeLayer.getBounds(), { padding: [24, 24] });
+  }
+
+  setTimeout(() => {
+    map.invalidateSize();
+  }, 150);
+}
 
 async function fetchJSON(url, options) {
   const response = await fetch(url, options);
@@ -86,6 +294,7 @@ function renderItinerary(itinerary) {
     saveButton.disabled = true;
     delete saveButton.dataset.itineraryPayload;
     delete saveButton.dataset.itineraryId;
+    resetMap('Map preview unavailable for this itinerary.');
     return;
   }
 
@@ -143,6 +352,11 @@ function renderItinerary(itinerary) {
   saveButton.dataset.itineraryId = trip.id;
   // Keep normalized shape for saving
   saveButton.dataset.itineraryPayload = JSON.stringify(trip);
+
+  updateMap(trip).catch((error) => {
+    console.error('Map rendering failed', error);
+    resetMap('Map preview unavailable for this itinerary.');
+  });
 }
 
 function renderHistory(trips) {
@@ -183,6 +397,7 @@ form.addEventListener('submit', async (event) => {
   saveButton.disabled = true;
   resultsSection.hidden = true;
   itineraryContainer.innerHTML = '<p>Generating your itinerary...</p>';
+  resetMap('Generating map preview...');
 
   try {
     const raw = await fetchJSON('api/generate_trip.php', {
@@ -196,6 +411,7 @@ form.addEventListener('submit', async (event) => {
     saveButton.disabled = true;
     delete saveButton.dataset.itineraryPayload;
     delete saveButton.dataset.itineraryId;
+    resetMap('Map preview unavailable for this itinerary.');
   }
 });
 
@@ -234,6 +450,7 @@ historyList.addEventListener('click', async (event) => {
   saveButton.disabled = true;
   resultsSection.hidden = true;
   itineraryContainer.innerHTML = '<p>Loading itinerary...</p>';
+  resetMap('Loading map preview...');
 
   try {
     const raw = await fetchJSON(`api/get_trip.php?id=${encodeURIComponent(tripId)}`);
@@ -244,6 +461,7 @@ historyList.addEventListener('click', async (event) => {
     saveButton.disabled = true;
     delete saveButton.dataset.itineraryPayload;
     delete saveButton.dataset.itineraryId;
+    resetMap('Map preview unavailable for this itinerary.');
   }
 });
 
