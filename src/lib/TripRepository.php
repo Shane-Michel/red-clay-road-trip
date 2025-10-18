@@ -62,6 +62,31 @@ class TripRepository
         }
     }
 
+    public static function updateTrip(int $id, array $itinerary): bool
+    {
+        try {
+            $db = self::getConnection();
+            $stmt = $db->prepare(
+                'UPDATE trips SET start_location = :start_location, departure_datetime = :departure_datetime, city_of_interest = :city_of_interest, itinerary_json = :itinerary_json, summary = :summary WHERE id = :id'
+            );
+
+            return $stmt->execute([
+                ':start_location' => $itinerary['start_location'],
+                ':departure_datetime' => $itinerary['departure_datetime'],
+                ':city_of_interest' => $itinerary['city_of_interest'],
+                ':itinerary_json' => json_encode($itinerary, JSON_THROW_ON_ERROR),
+                ':summary' => $itinerary['summary'] ?? substr($itinerary['route_overview'] ?? '', 0, 200),
+                ':id' => $id,
+            ]);
+        } catch (Throwable $exception) {
+            Logger::logThrowable($exception, [
+                'repository_method' => __METHOD__,
+                'trip_id' => $id,
+            ]);
+            throw $exception;
+        }
+    }
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -92,7 +117,28 @@ class TripRepository
                 return null;
             }
 
-            return json_decode($data['itinerary_json'], true, 512, JSON_THROW_ON_ERROR);
+            $decoded = json_decode($data['itinerary_json'], true, 512, JSON_THROW_ON_ERROR);
+            if (is_array($decoded)) {
+                $decoded['id'] = $id;
+            }
+
+            return $decoded;
+        } catch (Throwable $exception) {
+            Logger::logThrowable($exception, [
+                'repository_method' => __METHOD__,
+                'trip_id' => $id,
+            ]);
+            throw $exception;
+        }
+    }
+
+    public static function tripExists(int $id): bool
+    {
+        try {
+            $db = self::getConnection();
+            $stmt = $db->prepare('SELECT 1 FROM trips WHERE id = :id');
+            $stmt->execute([':id' => $id]);
+            return (bool) $stmt->fetchColumn();
         } catch (Throwable $exception) {
             Logger::logThrowable($exception, [
                 'repository_method' => __METHOD__,

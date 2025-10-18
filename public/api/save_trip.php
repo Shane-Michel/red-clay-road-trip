@@ -37,6 +37,17 @@ foreach ($required as $field) {
 }
 
 try {
+    $tripId = isset($input['id']) ? (int) $input['id'] : 0;
+    if ($tripId > 0) {
+        if (!TripRepository::tripExists($tripId)) {
+            respond(404, ['error' => 'Trip not found']);
+        }
+
+        $input['id'] = $tripId;
+        TripRepository::updateTrip($tripId, $input);
+        respond(200, ['id' => $tripId, 'updated' => true]);
+    }
+
     $id = TripRepository::saveTrip($input);
     respond(201, ['id' => $id]);
 } catch (Throwable $exception) {

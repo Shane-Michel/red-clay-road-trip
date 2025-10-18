@@ -56,14 +56,34 @@ TripRepository::initialize();
         <section id="results" class="results" aria-live="polite" hidden>
             <div class="results__header">
                 <h2>Your Personalized Itinerary</h2>
-                <button id="save-trip" class="btn btn--secondary" type="button">Save Trip</button>
+                <div class="results__actions">
+                    <button id="save-trip" class="btn btn--secondary" type="button">Save Trip</button>
+                    <button id="edit-trip" class="btn btn--ghost" type="button">Edit Itinerary</button>
+                    <button id="download-ics" class="btn btn--ghost" type="button">Download ICS</button>
+                    <button id="download-pdf" class="btn btn--ghost" type="button">Download PDF</button>
+                    <button id="share-trip" class="btn btn--ghost" type="button">Share Link</button>
+                </div>
             </div>
+            <div id="share-feedback" class="results__share" role="status" aria-live="polite" hidden></div>
             <div class="results__layout">
                 <section class="results__map" aria-label="Map preview of your itinerary">
                     <div id="map" class="map" role="presentation"></div>
                     <p id="map-message" class="map__message" aria-live="polite">Map preview will appear once your itinerary is ready.</p>
                 </section>
-                <div id="itinerary" class="results__content" role="list"></div>
+                <div class="results__content" role="list">
+                    <div id="itinerary" role="presentation"></div>
+                    <section id="itinerary-editor" class="editor" hidden aria-label="Edit itinerary stops">
+                        <header class="editor__header">
+                            <h3>Fine-tune your stops</h3>
+                            <p>Update the details below, then apply changes to refresh the itinerary and map.</p>
+                        </header>
+                        <div id="editor-stops" class="editor__stops"></div>
+                        <div class="editor__actions">
+                            <button id="add-stop" class="btn btn--ghost" type="button">Add Stop</button>
+                            <button id="apply-edits" class="btn" type="button" disabled>Apply edits</button>
+                        </div>
+                    </section>
+                </div>
             </div>
         </section>
 

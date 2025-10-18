@@ -2,15 +2,26 @@ const form = document.getElementById('trip-form');
 const resultsSection = document.getElementById('results');
 const itineraryContainer = document.getElementById('itinerary');
 const saveButton = document.getElementById('save-trip');
+const editButton = document.getElementById('edit-trip');
+const downloadIcsButton = document.getElementById('download-ics');
+const downloadPdfButton = document.getElementById('download-pdf');
+const shareButton = document.getElementById('share-trip');
 const historyList = document.getElementById('history-list');
 const historyTemplate = document.getElementById('history-item-template');
 const mapElement = document.getElementById('map');
 const mapMessage = document.getElementById('map-message');
+const shareFeedback = document.getElementById('share-feedback');
+const editorSection = document.getElementById('itinerary-editor');
+const editorStops = document.getElementById('editor-stops');
+const addStopButton = document.getElementById('add-stop');
+const applyEditsButton = document.getElementById('apply-edits');
 
 let mapInstance = null;
 let mapMarkers = [];
 let routeLayer = null;
 const geocodeCache = new Map();
+let currentTrip = null;
+let editorPendingChanges = false;
 
 function setMapMessage(text) {
   if (!mapMessage) return;
@@ -62,6 +73,28 @@ function resetMap(message = '') {
     setMapMessage(message);
   } else {
     setMapMessage('');
+  }
+}
+
+function clearShareFeedback() {
+  if (!shareFeedback) return;
+  shareFeedback.hidden = true;
+  shareFeedback.textContent = '';
+  shareFeedback.classList.remove('results__share--error');
+}
+
+function showShareFeedback(message, { html = false, error = false } = {}) {
+  if (!shareFeedback) return;
+  shareFeedback.hidden = false;
+  if (html) {
+    shareFeedback.innerHTML = message;
+  } else {
+    shareFeedback.textContent = message;
+  }
+  if (error) {
+    shareFeedback.classList.add('results__share--error');
+  } else {
+    shareFeedback.classList.remove('results__share--error');
   }
 }
 
@@ -243,6 +276,7 @@ async function fetchJSON(url, options) {
 // Normalize an itinerary-like object into a safe shape for rendering/storage
 function normalizeItinerary(x) {
   const obj = (x && typeof x === 'object') ? x : {};
+  const stops = Array.isArray(obj.stops) ? obj.stops : [];
   return {
     route_overview: String(obj.route_overview ?? ''),
     total_travel_time: String(obj.total_travel_time ?? ''),
@@ -253,8 +287,337 @@ function normalizeItinerary(x) {
     city_of_interest: String(obj.city_of_interest ?? ''),
     traveler_preferences: String(obj.traveler_preferences ?? ''),
     id: obj.id ?? '',
-    stops: Array.isArray(obj.stops) ? obj.stops : []
+    stops: stops.map((stop) => ({
+      title: String(stop?.title ?? ''),
+      address: String(stop?.address ?? ''),
+      duration: String(stop?.duration ?? ''),
+      description: String(stop?.description ?? ''),
+      historical_note: String(stop?.historical_note ?? ''),
+      challenge: String(stop?.challenge ?? ''),
+    })),
   };
+}
+
+function cloneTrip(trip) {
+  return JSON.parse(JSON.stringify(trip));
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case '&': return '&amp;';
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '"': return '&quot;';
+      case "'": return '&#39;';
+      default: return char;
+    }
+  });
+}
+
+function renderTripDetails(trip) {
+  if (!itineraryContainer) return;
+
+  itineraryContainer.innerHTML = '';
+
+  const intro = document.createElement('div');
+  intro.className = 'itinerary-intro';
+
+  const route = document.createElement('p');
+  const routeLabel = document.createElement('strong');
+  routeLabel.textContent = 'Route: ';
+  route.append(routeLabel, document.createTextNode(trip.route_overview || '—'));
+  intro.appendChild(route);
+
+  const travelTime = document.createElement('p');
+  const travelLabel = document.createElement('strong');
+  travelLabel.textContent = 'Total Travel Time: ';
+  travelTime.append(travelLabel, document.createTextNode(trip.total_travel_time || '—'));
+  intro.appendChild(travelTime);
+
+  itineraryContainer.appendChild(intro);
+
+  if (trip.summary) {
+    const summaryParagraph = document.createElement('p');
+    const summaryStrong = document.createElement('strong');
+    summaryStrong.textContent = 'Summary: ';
+    summaryParagraph.append(summaryStrong, document.createTextNode(trip.summary));
+    itineraryContainer.appendChild(summaryParagraph);
+  }
+
+  if (!trip.stops.length) {
+    const emptyMessage = document.createElement('p');
+    emptyMessage.className = 'error';
+    emptyMessage.textContent = 'No stops were provided for this itinerary.';
+    itineraryContainer.appendChild(emptyMessage);
+  }
+
+  trip.stops.forEach((stop, index) => {
+    const article = document.createElement('article');
+    article.className = 'itinerary-stop';
+
+    const heading = document.createElement('h3');
+    heading.textContent = `Stop ${index + 1}: ${stop.title || 'Untitled'}`;
+    article.appendChild(heading);
+
+    const meta = document.createElement('p');
+    meta.className = 'itinerary-stop__meta';
+    meta.textContent = `${stop.address || '—'} • Suggested time: ${stop.duration || '—'}`;
+    article.appendChild(meta);
+
+    if (stop.description) {
+      const description = document.createElement('p');
+      description.textContent = stop.description;
+      article.appendChild(description);
+    }
+
+    if (stop.historical_note) {
+      const historical = document.createElement('p');
+      const label = document.createElement('strong');
+      label.textContent = 'Historical Significance: ';
+      historical.append(label, document.createTextNode(stop.historical_note));
+      article.appendChild(historical);
+    }
+
+    if (stop.challenge) {
+      const challenge = document.createElement('p');
+      const label = document.createElement('strong');
+      label.textContent = 'Challenge: ';
+      challenge.append(label, document.createTextNode(stop.challenge));
+      article.appendChild(challenge);
+    }
+
+    itineraryContainer.appendChild(article);
+  });
+
+  if (trip.additional_tips) {
+    const tips = document.createElement('div');
+    tips.className = 'itinerary-tips';
+
+    const title = document.createElement('h3');
+    title.textContent = 'Travel Tips';
+    tips.appendChild(title);
+
+    const content = document.createElement('p');
+    content.textContent = trip.additional_tips;
+    tips.appendChild(content);
+
+    itineraryContainer.appendChild(tips);
+  }
+}
+
+function createEmptyStop() {
+  return {
+    title: '',
+    address: '',
+    duration: '',
+    description: '',
+    historical_note: '',
+    challenge: '',
+  };
+}
+
+function buildEditor() {
+  if (!editorStops || !editorSection) return;
+
+  editorStops.innerHTML = '';
+
+  if (!currentTrip) {
+    editorSection.hidden = true;
+    return;
+  }
+
+  if (!currentTrip.stops.length) {
+    const empty = document.createElement('p');
+    empty.className = 'editor__empty';
+    empty.textContent = 'No stops yet. Add one to personalize your itinerary.';
+    editorStops.appendChild(empty);
+  }
+
+  currentTrip.stops.forEach((stop, index) => {
+    const wrapper = document.createElement('article');
+    wrapper.className = 'editor-stop';
+    wrapper.dataset.index = String(index);
+
+    const header = document.createElement('div');
+    header.className = 'editor-stop__header';
+
+    const title = document.createElement('h4');
+    title.textContent = `Stop ${index + 1}`;
+    header.appendChild(title);
+
+    const controls = document.createElement('div');
+    controls.className = 'editor-stop__controls';
+
+    const moveUp = document.createElement('button');
+    moveUp.type = 'button';
+    moveUp.dataset.action = 'move-up';
+    moveUp.textContent = 'Move Up';
+    moveUp.disabled = index === 0;
+    controls.appendChild(moveUp);
+
+    const moveDown = document.createElement('button');
+    moveDown.type = 'button';
+    moveDown.dataset.action = 'move-down';
+    moveDown.textContent = 'Move Down';
+    moveDown.disabled = index === currentTrip.stops.length - 1;
+    controls.appendChild(moveDown);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.dataset.action = 'remove';
+    remove.textContent = 'Remove';
+    controls.appendChild(remove);
+
+    header.appendChild(controls);
+    wrapper.appendChild(header);
+
+    const fields = [
+      { label: 'Title', field: 'title', type: 'text', placeholder: 'Name of the stop' },
+      { label: 'Address or area', field: 'address', type: 'text', placeholder: 'Address or neighborhood' },
+      { label: 'Suggested time', field: 'duration', type: 'text', placeholder: 'e.g., 90 minutes' },
+      { label: 'Description', field: 'description', type: 'textarea', placeholder: 'What should travelers explore here?' },
+      { label: 'Historical significance', field: 'historical_note', type: 'textarea', placeholder: 'Key facts or stories' },
+      { label: 'Challenge', field: 'challenge', type: 'textarea', placeholder: 'Optional activity or prompt' },
+    ];
+
+    fields.forEach((config) => {
+      const fieldWrapper = document.createElement('label');
+      fieldWrapper.className = 'editor-stop__field';
+
+      const label = document.createElement('span');
+      label.textContent = config.label;
+      fieldWrapper.appendChild(label);
+
+      let input;
+      if (config.type === 'textarea') {
+        input = document.createElement('textarea');
+      } else {
+        input = document.createElement('input');
+        input.type = 'text';
+      }
+
+      input.value = stop[config.field] || '';
+      input.dataset.field = config.field;
+      if (config.placeholder) {
+        input.placeholder = config.placeholder;
+      }
+
+      fieldWrapper.appendChild(input);
+      wrapper.appendChild(fieldWrapper);
+    });
+
+    editorStops.appendChild(wrapper);
+  });
+
+  if (applyEditsButton) {
+    applyEditsButton.disabled = !editorPendingChanges;
+  }
+}
+
+function updateActionButtons() {
+  const hasTrip = Boolean(currentTrip);
+
+  if (saveButton) {
+    saveButton.disabled = !hasTrip;
+  }
+
+  if (editButton) {
+    editButton.disabled = !hasTrip;
+    const editorVisible = editorSection && !editorSection.hidden;
+    editButton.textContent = editorVisible ? 'Hide Editor' : 'Edit Itinerary';
+  }
+
+  if (downloadIcsButton) {
+    downloadIcsButton.disabled = !hasTrip;
+  }
+
+  if (downloadPdfButton) {
+    downloadPdfButton.disabled = !hasTrip;
+  }
+
+  if (shareButton) {
+    shareButton.disabled = !(hasTrip && currentTrip && currentTrip.id);
+  }
+}
+
+function markEditorDirty() {
+  editorPendingChanges = true;
+  if (applyEditsButton) {
+    applyEditsButton.disabled = false;
+  }
+  if (saveButton && currentTrip) {
+    saveButton.dataset.itineraryPayload = JSON.stringify(currentTrip);
+  }
+}
+
+function applyTripState(trip) {
+  currentTrip = cloneTrip(trip);
+  if (saveButton) {
+    saveButton.dataset.itineraryPayload = JSON.stringify(currentTrip);
+    if (currentTrip.id) {
+      saveButton.dataset.itineraryId = currentTrip.id;
+    } else {
+      delete saveButton.dataset.itineraryId;
+    }
+  }
+
+  renderTripDetails(currentTrip);
+  buildEditor();
+  editorPendingChanges = false;
+  if (applyEditsButton) {
+    applyEditsButton.disabled = true;
+  }
+
+  resultsSection.hidden = false;
+  updateActionButtons();
+  clearShareFeedback();
+
+  updateMap(currentTrip).catch((error) => {
+    console.error('Map rendering failed', error);
+    resetMap('Map preview unavailable for this itinerary.');
+  });
+}
+
+async function downloadTrip(format) {
+  if (!currentTrip) return;
+
+  clearShareFeedback();
+
+  try {
+    const response = await fetch('api/export_trip.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ format, trip: currentTrip }),
+    });
+
+    if (!response.ok) {
+      let message = `Unable to download ${format.toUpperCase()} export.`;
+      try {
+        const data = await response.json();
+        if (data && typeof data === 'object' && data.error) {
+          message = data.error;
+        }
+      } catch (error) {
+        // ignore parsing failures
+      }
+      throw new Error(message);
+    }
+
+    const blob = await response.blob();
+    const filename = `road-trip-${new Date().toISOString().slice(0, 10)}.${format}`;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error(error);
+    showShareFeedback(error.message || `Unable to download ${format.toUpperCase()} export.`, { error: true });
+  }
 }
 
 function unwrapItineraryPayload(payload) {
@@ -279,84 +642,46 @@ function unwrapItineraryPayload(payload) {
 }
 
 function renderItinerary(itinerary) {
-  itineraryContainer.innerHTML = '';
+  if (itineraryContainer) {
+    itineraryContainer.innerHTML = '';
+  }
+
+  clearShareFeedback();
 
   const payload = unwrapItineraryPayload(itinerary);
 
-  // Handle error shapes: { error: "msg" } or { error: { message: "msg" } }
   if (payload && typeof payload === 'object' && payload.error) {
     const errSource = payload.error;
     const errMsg = typeof errSource === 'string'
       ? errSource
       : (errSource.message || 'Unable to display the itinerary at this time.');
-    itineraryContainer.innerHTML = `<p class="error">${errMsg}</p>`;
+    if (itineraryContainer) {
+      const errorParagraph = document.createElement('p');
+      errorParagraph.className = 'error';
+      errorParagraph.textContent = errMsg;
+      itineraryContainer.appendChild(errorParagraph);
+    }
+    currentTrip = null;
+    editorPendingChanges = false;
+    if (applyEditsButton) {
+      applyEditsButton.disabled = true;
+    }
+    if (saveButton) {
+      saveButton.disabled = true;
+      delete saveButton.dataset.itineraryPayload;
+      delete saveButton.dataset.itineraryId;
+    }
+    if (editorSection) {
+      editorSection.hidden = true;
+    }
+    updateActionButtons();
     resultsSection.hidden = false;
-    saveButton.disabled = true;
-    delete saveButton.dataset.itineraryPayload;
-    delete saveButton.dataset.itineraryId;
     resetMap('Map preview unavailable for this itinerary.');
     return;
   }
 
   const trip = normalizeItinerary(payload);
-
-  const intro = document.createElement('div');
-  intro.className = 'itinerary-intro';
-  intro.innerHTML = `
-      <p><strong>Route:</strong> ${trip.route_overview || '—'}</p>
-      <p><strong>Total Travel Time:</strong> ${trip.total_travel_time || '—'}</p>
-  `;
-  itineraryContainer.appendChild(intro);
-
-  if (!trip.stops.length) {
-    const emptyMessage = document.createElement('p');
-    emptyMessage.className = 'error';
-    emptyMessage.textContent = 'No stops were provided for this itinerary.';
-    itineraryContainer.appendChild(emptyMessage);
-  }
-
-  trip.stops.forEach((stop, index) => {
-    const safe = {
-      title: String(stop?.title ?? 'Untitled'),
-      address: String(stop?.address ?? '—'),
-      duration: String(stop?.duration ?? '—'),
-      description: String(stop?.description ?? ''),
-      historical_note: String(stop?.historical_note ?? ''),
-      challenge: String(stop?.challenge ?? '')
-    };
-
-    const article = document.createElement('article');
-    article.className = 'itinerary-stop';
-    article.innerHTML = `
-        <h3>Stop ${index + 1}: ${safe.title}</h3>
-        <p class="itinerary-stop__meta">${safe.address} &bull; Suggested time: ${safe.duration}</p>
-        <p>${safe.description}</p>
-        <p><strong>Historical Significance:</strong> ${safe.historical_note}</p>
-        <p><strong>Challenge:</strong> ${safe.challenge}</p>
-    `;
-    itineraryContainer.appendChild(article);
-  });
-
-  if (trip.additional_tips) {
-    const tips = document.createElement('div');
-    tips.className = 'itinerary-tips';
-    tips.innerHTML = `
-        <h3>Travel Tips</h3>
-        <p>${trip.additional_tips}</p>
-    `;
-    itineraryContainer.appendChild(tips);
-  }
-
-  resultsSection.hidden = false;
-  saveButton.disabled = false;
-  saveButton.dataset.itineraryId = trip.id;
-  // Keep normalized shape for saving
-  saveButton.dataset.itineraryPayload = JSON.stringify(trip);
-
-  updateMap(trip).catch((error) => {
-    console.error('Map rendering failed', error);
-    resetMap('Map preview unavailable for this itinerary.');
-  });
+  applyTripState(trip);
 }
 
 function renderHistory(trips) {
@@ -398,6 +723,10 @@ form.addEventListener('submit', async (event) => {
   resultsSection.hidden = true;
   itineraryContainer.innerHTML = '<p>Generating your itinerary...</p>';
   resetMap('Generating map preview...');
+  if (editorSection) {
+    editorSection.hidden = true;
+  }
+  clearShareFeedback();
 
   try {
     const raw = await fetchJSON('api/generate_trip.php', {
@@ -419,16 +748,30 @@ saveButton.addEventListener('click', async () => {
   if (!saveButton.dataset.itineraryPayload) return;
 
   saveButton.disabled = true;
+  clearShareFeedback();
+
   const payload = JSON.parse(saveButton.dataset.itineraryPayload);
 
   try {
-    await fetchJSON('api/save_trip.php', {
+    const response = await fetchJSON('api/save_trip.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+
+    if (currentTrip) {
+      currentTrip.id = response.id ?? currentTrip.id;
+      saveButton.dataset.itineraryPayload = JSON.stringify(currentTrip);
+      if (currentTrip.id) {
+        saveButton.dataset.itineraryId = currentTrip.id;
+      }
+    }
+
     await loadHistory();
-    saveButton.textContent = 'Saved!';
+    updateActionButtons();
+
+    const savedLabel = response && response.updated ? 'Updated!' : 'Saved!';
+    saveButton.textContent = savedLabel;
     setTimeout(() => {
       saveButton.textContent = 'Save Trip';
       saveButton.disabled = false;
@@ -451,6 +794,10 @@ historyList.addEventListener('click', async (event) => {
   resultsSection.hidden = true;
   itineraryContainer.innerHTML = '<p>Loading itinerary...</p>';
   resetMap('Loading map preview...');
+  clearShareFeedback();
+  if (editorSection) {
+    editorSection.hidden = true;
+  }
 
   try {
     const raw = await fetchJSON(`api/get_trip.php?id=${encodeURIComponent(tripId)}`);
@@ -465,4 +812,139 @@ historyList.addEventListener('click', async (event) => {
   }
 });
 
+if (editButton && editorSection) {
+  editButton.addEventListener('click', () => {
+    if (!currentTrip) return;
+    editorSection.hidden = !editorSection.hidden;
+    buildEditor();
+    updateActionButtons();
+  });
+}
+
+if (addStopButton) {
+  addStopButton.addEventListener('click', () => {
+    if (!currentTrip) return;
+    currentTrip.stops.push(createEmptyStop());
+    buildEditor();
+    markEditorDirty();
+  });
+}
+
+if (editorStops) {
+  editorStops.addEventListener('input', (event) => {
+    const input = event.target;
+    if (!input.dataset.field) return;
+    const wrapper = input.closest('.editor-stop');
+    if (!wrapper) return;
+    const index = Number.parseInt(wrapper.dataset.index ?? '', 10);
+    if (!currentTrip || Number.isNaN(index) || !currentTrip.stops[index]) return;
+    currentTrip.stops[index][input.dataset.field] = input.value;
+    markEditorDirty();
+  });
+
+  editorStops.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-action]');
+    if (!button) return;
+    const wrapper = button.closest('.editor-stop');
+    if (!wrapper) return;
+    const index = Number.parseInt(wrapper.dataset.index ?? '', 10);
+    if (!currentTrip || Number.isNaN(index) || !currentTrip.stops[index]) return;
+
+    if (button.dataset.action === 'remove') {
+      currentTrip.stops.splice(index, 1);
+      buildEditor();
+      markEditorDirty();
+      return;
+    }
+
+    const offset = button.dataset.action === 'move-up' ? -1 : 1;
+    const targetIndex = index + offset;
+    if (targetIndex < 0 || targetIndex >= currentTrip.stops.length) {
+      return;
+    }
+    const temp = currentTrip.stops[index];
+    currentTrip.stops[index] = currentTrip.stops[targetIndex];
+    currentTrip.stops[targetIndex] = temp;
+    buildEditor();
+    markEditorDirty();
+  });
+}
+
+if (applyEditsButton) {
+  applyEditsButton.addEventListener('click', () => {
+    if (!currentTrip) return;
+    clearShareFeedback();
+    renderTripDetails(currentTrip);
+    editorPendingChanges = false;
+    applyEditsButton.disabled = true;
+    saveButton.dataset.itineraryPayload = JSON.stringify(currentTrip);
+    updateMap(currentTrip).catch((error) => {
+      console.error('Map rendering failed', error);
+      resetMap('Map preview unavailable for this itinerary.');
+    });
+  });
+}
+
+if (downloadIcsButton) {
+  downloadIcsButton.addEventListener('click', () => downloadTrip('ics'));
+}
+
+if (downloadPdfButton) {
+  downloadPdfButton.addEventListener('click', () => downloadTrip('pdf'));
+}
+
+if (shareButton) {
+  shareButton.addEventListener('click', async () => {
+    if (!currentTrip) return;
+    if (!currentTrip.id) {
+      showShareFeedback('Save this itinerary before sharing it with others.', { error: true });
+      return;
+    }
+
+    clearShareFeedback();
+    const originalLabel = shareButton.textContent;
+    shareButton.textContent = 'Generating...';
+    shareButton.disabled = true;
+
+    try {
+      const data = await fetchJSON('api/create_share_link.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: currentTrip.id }),
+      });
+
+      const shareUrl = new URL(data.share_url, window.location.origin).toString();
+      const safeUrl = escapeHtml(shareUrl);
+      const anchor = `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">Open shared itinerary</a>`;
+      let message = `Shareable link ready: ${anchor}`;
+
+      if (data.expires_at) {
+        const expires = escapeHtml(new Date(data.expires_at).toLocaleString());
+        message += ` (expires ${expires})`;
+      }
+
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        message = `Link copied to clipboard! ${anchor}`;
+        if (data.expires_at) {
+          const expires = escapeHtml(new Date(data.expires_at).toLocaleString());
+          message += ` (expires ${expires})`;
+        }
+      } catch (copyError) {
+        console.warn('Unable to copy share link automatically', copyError);
+      }
+
+      showShareFeedback(message, { html: true });
+    } catch (error) {
+      console.error(error);
+      showShareFeedback(error.message || 'Unable to create share link.', { error: true });
+    } finally {
+      shareButton.textContent = originalLabel;
+      shareButton.disabled = false;
+      updateActionButtons();
+    }
+  });
+}
+
+updateActionButtons();
 loadHistory();
