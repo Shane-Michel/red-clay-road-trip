@@ -15,6 +15,7 @@ TripRepository::initialize();
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Red Clay Road Trip</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
     <link rel="stylesheet" href="assets/css/style.css" />
 </head>
 <body>
@@ -57,7 +58,13 @@ TripRepository::initialize();
                 <h2>Your Personalized Itinerary</h2>
                 <button id="save-trip" class="btn btn--secondary" type="button">Save Trip</button>
             </div>
-            <div id="itinerary" class="results__content"></div>
+            <div class="results__layout">
+                <section class="results__map" aria-label="Map preview of your itinerary">
+                    <div id="map" class="map" role="presentation"></div>
+                    <p id="map-message" class="map__message" aria-live="polite">Map preview will appear once your itinerary is ready.</p>
+                </section>
+                <div id="itinerary" class="results__content" role="list"></div>
+            </div>
         </section>
 
         <section class="history" aria-labelledby="history-title">
@@ -78,6 +85,7 @@ TripRepository::initialize();
         </article>
     </template>
 
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="" defer></script>
     <script src="assets/js/app.js" defer></script>
 </body>
 </html>
