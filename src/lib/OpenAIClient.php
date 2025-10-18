@@ -12,7 +12,7 @@ class OpenAIClient
     /** @var string */
     private $model;
 
-    public function __construct(?string $apiKey = null, string $model = 'gpt-4.1-mini')
+    public function __construct(?string $apiKey = null, string $model = 'gpt-5-nano')
     {
         if ($apiKey === null) {
             $apiKey = $this->readFromEnvironment('OPENAI_API_KEY');
