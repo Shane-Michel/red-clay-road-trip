@@ -49,14 +49,38 @@ function normalizeItinerary(x) {
   };
 }
 
+function unwrapItineraryPayload(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+
+  // Surface nested error objects consistently
+  if (payload.error) {
+    return { error: payload.error };
+  }
+
+  if (payload.data && typeof payload.data === 'object') {
+    const nested = payload.data;
+    if (nested && typeof nested === 'object') {
+      if (nested.error) {
+        return { error: nested.error };
+      }
+      return nested;
+    }
+  }
+
+  return payload;
+}
+
 function renderItinerary(itinerary) {
   itineraryContainer.innerHTML = '';
 
+  const payload = unwrapItineraryPayload(itinerary);
+
   // Handle error shapes: { error: "msg" } or { error: { message: "msg" } }
-  if (itinerary && typeof itinerary === 'object' && itinerary.error) {
-    const errMsg = typeof itinerary.error === 'string'
-      ? itinerary.error
-      : (itinerary.error.message || 'Unable to display the itinerary at this time.');
+  if (payload && typeof payload === 'object' && payload.error) {
+    const errSource = payload.error;
+    const errMsg = typeof errSource === 'string'
+      ? errSource
+      : (errSource.message || 'Unable to display the itinerary at this time.');
     itineraryContainer.innerHTML = `<p class="error">${errMsg}</p>`;
     resultsSection.hidden = false;
     saveButton.disabled = true;
@@ -65,7 +89,7 @@ function renderItinerary(itinerary) {
     return;
   }
 
-  const trip = normalizeItinerary(itinerary);
+  const trip = normalizeItinerary(payload);
 
   const intro = document.createElement('div');
   intro.className = 'itinerary-intro';
