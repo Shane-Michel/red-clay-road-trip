@@ -89,16 +89,41 @@ final class OpenAIClient
             throw $exception;
         }
 
-        // Responses API returns a JSON string under output[0].content[0].text (per your format)
-        $text = $response['output'][0]['content'][0]['text'] ?? null;
-        if (!is_string($text) || trim($text) === '') {
+        $content = $response['output'][0]['content'] ?? null;
+        $rawItinerary = null;
+
+        if (is_array($content)) {
+            foreach ($content as $part) {
+                if (!is_array($part)) {
+                    continue;
+                }
+
+                // Responses API with json_schema may return `output_json` blocks
+                if (isset($part['json']) && is_array($part['json'])) {
+                    $rawItinerary = $part['json'];
+                    break;
+                }
+
+                $text = $part['text'] ?? null;
+                if (is_string($text) && trim($text) !== '') {
+                    $rawItinerary = $text;
+                    break;
+                }
+            }
+        }
+
+        if ($rawItinerary === null) {
             // Return a normalized empty object to keep FE happy
             return $this->normalizeItinerary([]);
         }
 
+        if (is_array($rawItinerary)) {
+            return $this->normalizeItinerary($rawItinerary);
+        }
+
         try {
             /** @var array<string, mixed> $decoded */
-            $decoded = json_decode($text, true, 512, JSON_THROW_ON_ERROR);
+            $decoded = json_decode($rawItinerary, true, 512, JSON_THROW_ON_ERROR);
         } catch (\Throwable $exception) {
             Logger::logThrowable($exception, [
                 'client_method' => __METHOD__,
