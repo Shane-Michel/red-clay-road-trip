@@ -183,17 +183,20 @@ async function updateMap(trip) {
 
   resetMap('Plotting your road trip...');
 
+  const safeTrip = (trip && typeof trip === 'object') ? trip : {};
   const points = [];
-  if (trip.start_location) {
+  const stops = Array.isArray(safeTrip.stops) ? safeTrip.stops : [];
+
+  if (safeTrip.start_location) {
     points.push({
       label: 'Start',
-      description: trip.start_location,
+      description: safeTrip.start_location,
     });
   }
 
-  trip.stops.forEach((stop, index) => {
+  stops.forEach((stop, index) => {
     const stopLabel = `Stop ${index + 1}: ${stop.title || stop.address || 'Scheduled stop'}`;
-    const lookup = stop.address || stop.title || trip.city_of_interest || '';
+    const lookup = stop.address || stop.title || safeTrip.city_of_interest || '';
     points.push({
       label: stopLabel,
       description: lookup,
@@ -318,6 +321,9 @@ function escapeHtml(value) {
 function renderTripDetails(trip) {
   if (!itineraryContainer) return;
 
+  const safeTrip = (trip && typeof trip === 'object') ? trip : {};
+  const stops = Array.isArray(safeTrip.stops) ? safeTrip.stops : [];
+
   itineraryContainer.innerHTML = '';
 
   const intro = document.createElement('div');
@@ -326,33 +332,33 @@ function renderTripDetails(trip) {
   const route = document.createElement('p');
   const routeLabel = document.createElement('strong');
   routeLabel.textContent = 'Route: ';
-  route.append(routeLabel, document.createTextNode(trip.route_overview || '—'));
+  route.append(routeLabel, document.createTextNode(safeTrip.route_overview || '—'));
   intro.appendChild(route);
 
   const travelTime = document.createElement('p');
   const travelLabel = document.createElement('strong');
   travelLabel.textContent = 'Total Travel Time: ';
-  travelTime.append(travelLabel, document.createTextNode(trip.total_travel_time || '—'));
+  travelTime.append(travelLabel, document.createTextNode(safeTrip.total_travel_time || '—'));
   intro.appendChild(travelTime);
 
   itineraryContainer.appendChild(intro);
 
-  if (trip.summary) {
+  if (safeTrip.summary) {
     const summaryParagraph = document.createElement('p');
     const summaryStrong = document.createElement('strong');
     summaryStrong.textContent = 'Summary: ';
-    summaryParagraph.append(summaryStrong, document.createTextNode(trip.summary));
+    summaryParagraph.append(summaryStrong, document.createTextNode(safeTrip.summary));
     itineraryContainer.appendChild(summaryParagraph);
   }
 
-  if (!trip.stops.length) {
+  if (!stops.length) {
     const emptyMessage = document.createElement('p');
     emptyMessage.className = 'error';
     emptyMessage.textContent = 'No stops were provided for this itinerary.';
     itineraryContainer.appendChild(emptyMessage);
   }
 
-  trip.stops.forEach((stop, index) => {
+  stops.forEach((stop, index) => {
     const article = document.createElement('article');
     article.className = 'itinerary-stop';
 
@@ -390,7 +396,7 @@ function renderTripDetails(trip) {
     itineraryContainer.appendChild(article);
   });
 
-  if (trip.additional_tips) {
+  if (safeTrip.additional_tips) {
     const tips = document.createElement('div');
     tips.className = 'itinerary-tips';
 
@@ -399,7 +405,7 @@ function renderTripDetails(trip) {
     tips.appendChild(title);
 
     const content = document.createElement('p');
-    content.textContent = trip.additional_tips;
+    content.textContent = safeTrip.additional_tips;
     tips.appendChild(content);
 
     itineraryContainer.appendChild(tips);
@@ -427,14 +433,16 @@ function buildEditor() {
     return;
   }
 
-  if (!currentTrip.stops.length) {
+  const stops = Array.isArray(currentTrip.stops) ? currentTrip.stops : [];
+
+  if (!stops.length) {
     const empty = document.createElement('p');
     empty.className = 'editor__empty';
     empty.textContent = 'No stops yet. Add one to personalize your itinerary.';
     editorStops.appendChild(empty);
   }
 
-  currentTrip.stops.forEach((stop, index) => {
+  stops.forEach((stop, index) => {
     const wrapper = document.createElement('article');
     wrapper.className = 'editor-stop';
     wrapper.dataset.index = String(index);
@@ -460,7 +468,7 @@ function buildEditor() {
     moveDown.type = 'button';
     moveDown.dataset.action = 'move-down';
     moveDown.textContent = 'Move Down';
-    moveDown.disabled = index === currentTrip.stops.length - 1;
+    moveDown.disabled = index === stops.length - 1;
     controls.appendChild(moveDown);
 
     const remove = document.createElement('button');
