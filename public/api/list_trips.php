@@ -12,7 +12,7 @@ TripRepository::initialize();
 try {
     $trips = TripRepository::listTrips();
     echo json_encode($trips, JSON_PRETTY_PRINT);
-} catch (Throwable $exception) {
+} catch (\Throwable $exception) {
     Logger::logThrowable($exception, ['endpoint' => 'list_trips']);
     http_response_code(500);
     echo json_encode(['error' => $exception->getMessage()]);
