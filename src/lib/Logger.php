@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-
 final class Logger
 {
     private const LOG_DIRECTORY = '/data/logs';
@@ -64,7 +63,7 @@ final class Logger
     /**
      * @param array<string, mixed> $context
      */
-    public static function logThrowable(Throwable $throwable, array $context = []): void
+    public static function logThrowable(\Throwable $throwable, array $context = []): void
     {
         $context['exception'] = [
             'type' => get_class($throwable),

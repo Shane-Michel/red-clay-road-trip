@@ -20,7 +20,7 @@ $rawInput = file_get_contents('php://input');
 
 try {
     $input = json_decode($rawInput ?: '[]', true, 512, JSON_THROW_ON_ERROR);
-} catch (JsonException $exception) {
+} catch (\JsonException $exception) {
     Logger::logThrowable($exception, [
         'endpoint' => 'save_trip',
         'stage' => 'decode_payload',
@@ -50,7 +50,7 @@ try {
 
     $id = TripRepository::saveTrip($input);
     respond(201, ['id' => $id]);
-} catch (Throwable $exception) {
+} catch (\Throwable $exception) {
     Logger::logThrowable($exception, [
         'endpoint' => 'save_trip',
         'payload' => $input,

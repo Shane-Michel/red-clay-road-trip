@@ -18,7 +18,7 @@ $raw = file_get_contents('php://input');
 
 try {
     $input = json_decode($raw ?: '[]', true, 512, JSON_THROW_ON_ERROR);
-} catch (Throwable $exception) {
+} catch (\Throwable $exception) {
     Logger::logThrowable($exception, [
         'endpoint' => 'export_trip',
         'stage' => 'decode_payload',
@@ -60,7 +60,7 @@ try {
     header('Content-Disposition: attachment; filename="road-trip.pdf"');
     echo $payload;
     exit;
-} catch (Throwable $exception) {
+} catch (\Throwable $exception) {
     Logger::logThrowable($exception, [
         'endpoint' => 'export_trip',
         'format' => $format,

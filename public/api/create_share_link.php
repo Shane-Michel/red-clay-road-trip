@@ -20,7 +20,7 @@ $raw = file_get_contents('php://input');
 
 try {
     $input = json_decode($raw ?: '[]', true, 512, JSON_THROW_ON_ERROR);
-} catch (Throwable $exception) {
+} catch (\Throwable $exception) {
     Logger::logThrowable($exception, [
         'endpoint' => 'create_share_link',
         'stage' => 'decode_payload',
@@ -60,7 +60,7 @@ try {
         'expires' => $token['expires'],
         'expires_at' => (new \DateTimeImmutable('@' . $token['expires']))->setTimezone(new \DateTimeZone('UTC'))->format(\DateTimeInterface::ATOM),
     ]);
-} catch (Throwable $exception) {
+} catch (\Throwable $exception) {
     Logger::logThrowable($exception, [
         'endpoint' => 'create_share_link',
         'trip_id' => $tripId,
