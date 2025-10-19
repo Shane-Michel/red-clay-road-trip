@@ -7,6 +7,8 @@ require_once __DIR__ . '/Logger.php';
 
 class OpenAIClient
 {
+    private const MAX_ATTEMPTS = 3;
+
     /** @var string */
     private $apiKey;
     /** @var string */
@@ -97,7 +99,6 @@ class OpenAIClient
      */
     private function request(array $body): array
     {
-        $ch = curl_init('https://api.openai.com/v1/responses');
         try {
             $encodedBody = json_encode($body, JSON_THROW_ON_ERROR);
         } catch (Throwable $exception) {
@@ -108,30 +109,64 @@ class OpenAIClient
             throw $exception;
         }
 
-        curl_setopt_array($ch, [
-            CURLOPT_POST => true,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => [
-                'Content-Type: application/json',
-                'Authorization: Bearer ' . $this->apiKey,
-            ],
-            CURLOPT_POSTFIELDS => $encodedBody,
-            CURLOPT_CONNECTTIMEOUT => 10,
-            CURLOPT_TIMEOUT => 60,
-        ]);
+        $status = null;
+        $raw = null;
+        $lastErrorMessage = null;
 
-        $raw = curl_exec($ch);
-        if ($raw === false) {
-            $errorMessage = 'Failed to contact OpenAI: ' . curl_error($ch);
-            Logger::log($errorMessage, [
-                'client_method' => __METHOD__,
+        for ($attempt = 1; $attempt <= self::MAX_ATTEMPTS; $attempt++) {
+            $ch = curl_init('https://api.openai.com/v1/responses');
+
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: application/json',
+                    'Authorization: Bearer ' . $this->apiKey,
+                ],
+                CURLOPT_POSTFIELDS => $encodedBody,
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_TIMEOUT => 60,
             ]);
+
+            $raw = curl_exec($ch);
+            if ($raw !== false) {
+                $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+                curl_close($ch);
+                break;
+            }
+
+            $errorCode = curl_errno($ch);
+            $lastErrorMessage = sprintf(
+                'Failed to contact OpenAI (attempt %d/%d): [%d] %s',
+                $attempt,
+                self::MAX_ATTEMPTS,
+                $errorCode,
+                curl_error($ch)
+            );
+
+            Logger::log($lastErrorMessage, [
+                'client_method' => __METHOD__,
+                'attempt' => $attempt,
+                'max_attempts' => self::MAX_ATTEMPTS,
+                'curl_error_code' => $errorCode,
+            ]);
+
             curl_close($ch);
-            throw new RuntimeException($errorMessage);
+
+            if ($attempt === self::MAX_ATTEMPTS) {
+                throw new RuntimeException($lastErrorMessage ?? 'Failed to contact OpenAI.');
+            }
+
+            sleep(1 << ($attempt - 1));
         }
 
-        $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-        curl_close($ch);
+        if ($raw === null) {
+            throw new RuntimeException('Failed to contact OpenAI.');
+        }
+
+        if ($status === null) {
+            $status = 0;
+        }
 
         try {
             $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
