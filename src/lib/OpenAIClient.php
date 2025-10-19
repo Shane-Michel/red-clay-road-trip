@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/Logger.php';
 
-
-class OpenAIClient
+final class OpenAIClient
 {
     private const MAX_ATTEMPTS = 3;
 
@@ -14,21 +13,23 @@ class OpenAIClient
     /** @var string */
     private $model;
 
-    public function __construct(?string $apiKey = null, string $model = 'gpt-5-nano')
+    public function __construct(?string $apiKey = null, string $model = 'gpt-4.1-mini')
     {
+        // Prefer explicit API key; otherwise read from environment
         if ($apiKey === null) {
             $apiKey = $this->readFromEnvironment('OPENAI_API_KEY');
         }
         if ($apiKey === '') {
-            throw new RuntimeException('OPENAI_API_KEY is not set.');
+            throw new \RuntimeException('OPENAI_API_KEY is not set.');
         }
 
         $this->apiKey = $apiKey;
+
+        // Allow model override via env
         $configuredModel = $this->readFromEnvironment('OPENAI_MODEL');
         if ($configuredModel !== '') {
             $model = $configuredModel;
         }
-
         $this->model = $model;
     }
 
@@ -38,22 +39,37 @@ class OpenAIClient
      */
     public function generateItinerary(array $payload): array
     {
+        // Read fields defensively to avoid PHP notices
+        $start = (string)($payload['start_location'] ?? '');
+        $depart = (string)($payload['departure_datetime'] ?? '');
+        $city = (string)($payload['city_of_interest'] ?? '');
+        $prefs = (string)($payload['traveler_preferences'] ?? 'None provided');
+
         $requestBody = [
             'model' => $this->model,
             'input' => [
-                ['role' => 'system', 'content' => 'You are a travel historian who designs detailed, accessible scavenger hunts for road trips.'],
-                ['role' => 'user', 'content' => sprintf(
-                    "Plan a historical road trip scavenger hunt.\n\nStart location: %s\nDeparture: %s\nCity of interest: %s\nPreferences: %s\n\nProvide an overview, driving segments, 4-6 stops with history challenges, travel tips, and accessibility notes.",
-                    $payload['start_location'],
-                    $payload['departure_datetime'],
-                    $payload['city_of_interest'],
-                    $payload['traveler_preferences'] ?? 'None provided'
-                )],
+                [
+                    'role' => 'system',
+                    'content' => 'You are a travel historian who designs detailed, accessible scavenger hunts for road trips.',
+                ],
+                [
+                    'role' => 'user',
+                    'content' => sprintf(
+                        "Plan a historical road trip scavenger hunt.\n\n".
+                        "Start location: %s\nDeparture: %s\nCity of interest: %s\nPreferences: %s\n\n".
+                        "Provide an overview, driving segments, 4-6 stops with history challenges, travel tips, and accessibility notes.",
+                        $start,
+                        $depart,
+                        $city,
+                        $prefs
+                    ),
+                ],
             ],
+            // Responses API: use text.format with a json_schema
             'text' => [
                 'format' => [
-                    'type' => 'json_schema',
-                    'name' => 'historical_road_trip',
+                    'type'   => 'json_schema',
+                    'name'   => 'historical_road_trip',
                     'schema' => $this->schema(),
                 ],
             ],
@@ -61,36 +77,38 @@ class OpenAIClient
 
         try {
             $response = $this->request($requestBody);
-        } catch (Throwable $exception) {
+        } catch (\Throwable $exception) {
             Logger::logThrowable($exception, [
                 'client_method' => __METHOD__,
                 'request_context' => [
-                    'start_location' => $payload['start_location'] ?? null,
-                    'departure_datetime' => $payload['departure_datetime'] ?? null,
-                    'city_of_interest' => $payload['city_of_interest'] ?? null,
+                    'start_location' => $start,
+                    'departure_datetime' => $depart,
+                    'city_of_interest' => $city,
                 ],
             ]);
             throw $exception;
         }
 
+        // Responses API returns a JSON string under output[0].content[0].text (per your format)
         $text = $response['output'][0]['content'][0]['text'] ?? null;
         if (!is_string($text) || trim($text) === '') {
-            return [];
+            // Return a normalized empty object to keep FE happy
+            return $this->normalizeItinerary([]);
         }
 
         try {
             /** @var array<string, mixed> $decoded */
             $decoded = json_decode($text, true, 512, JSON_THROW_ON_ERROR);
-        } catch (Throwable $exception) {
+        } catch (\Throwable $exception) {
             Logger::logThrowable($exception, [
                 'client_method' => __METHOD__,
                 'stage' => 'decode_itinerary',
             ]);
-
-            throw new RuntimeException('Unable to decode itinerary payload.', 0, $exception);
+            throw new \RuntimeException('Unable to decode itinerary payload.', 0, $exception);
         }
 
-        return $decoded;
+        // Normalize to guarantee keys your FE expects
+        return $this->normalizeItinerary($decoded);
     }
 
     /**
@@ -99,9 +117,13 @@ class OpenAIClient
      */
     private function request(array $body): array
     {
+        if (!function_exists('curl_init')) {
+            throw new \RuntimeException('cURL extension is not enabled in PHP.');
+        }
+
         try {
             $encodedBody = json_encode($body, JSON_THROW_ON_ERROR);
-        } catch (Throwable $exception) {
+        } catch (\Throwable $exception) {
             Logger::logThrowable($exception, [
                 'client_method' => __METHOD__,
                 'stage' => 'encode_request',
@@ -117,20 +139,25 @@ class OpenAIClient
             $ch = curl_init('https://api.openai.com/v1/responses');
 
             curl_setopt_array($ch, [
-                CURLOPT_POST => true,
+                CURLOPT_POST           => true,
                 CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_HTTPHEADER => [
+                CURLOPT_HTTPHEADER     => [
                     'Content-Type: application/json',
                     'Authorization: Bearer ' . $this->apiKey,
+                    'User-Agent: RedClayRoadTrip/1.0 (+php; litespeed)',
                 ],
-                CURLOPT_POSTFIELDS => $encodedBody,
+                CURLOPT_POSTFIELDS     => $encodedBody,
                 CURLOPT_CONNECTTIMEOUT => 10,
-                CURLOPT_TIMEOUT => 60,
+                CURLOPT_TIMEOUT        => 60,
+                CURLOPT_SSL_VERIFYPEER => true,
+                CURLOPT_SSL_VERIFYHOST => 2,
+                CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
             ]);
 
             $raw = curl_exec($ch);
+
             if ($raw !== false) {
-                $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+                $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
                 curl_close($ch);
                 break;
             }
@@ -145,32 +172,33 @@ class OpenAIClient
             );
 
             Logger::log($lastErrorMessage, [
-                'client_method' => __METHOD__,
-                'attempt' => $attempt,
-                'max_attempts' => self::MAX_ATTEMPTS,
+                'client_method'   => __METHOD__,
+                'attempt'         => $attempt,
+                'max_attempts'    => self::MAX_ATTEMPTS,
                 'curl_error_code' => $errorCode,
             ]);
 
             curl_close($ch);
 
             if ($attempt === self::MAX_ATTEMPTS) {
-                throw new RuntimeException($lastErrorMessage ?? 'Failed to contact OpenAI.');
+                throw new \RuntimeException($lastErrorMessage ?? 'Failed to contact OpenAI.');
             }
 
+            // Exponential backoff: 1s, 2s
             sleep(1 << ($attempt - 1));
         }
 
         if ($raw === null) {
-            throw new RuntimeException('Failed to contact OpenAI.');
+            throw new \RuntimeException('Failed to contact OpenAI.');
         }
-
         if ($status === null) {
             $status = 0;
         }
 
         try {
+            /** @var array<string, mixed> $decoded */
             $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
-        } catch (Throwable $exception) {
+        } catch (\Throwable $exception) {
             Logger::logThrowable($exception, [
                 'client_method' => __METHOD__,
                 'stage' => 'decode_response',
@@ -182,16 +210,18 @@ class OpenAIClient
         if ($status >= 400) {
             Logger::log('OpenAI API error', [
                 'client_method' => __METHOD__,
-                'status' => $status,
-                'response' => $decoded,
+                'status'        => $status,
+                'response'      => $decoded,
             ]);
-            throw new RuntimeException('OpenAI API error: ' . ($decoded['error']['message'] ?? 'Unknown error'));
+            $detail = is_array($decoded) ? ($decoded['error']['message'] ?? 'Unknown error') : 'Unknown error';
+            throw new \RuntimeException('OpenAI API error: ' . $detail);
         }
 
         return $decoded;
     }
 
     /**
+     * JSON schema for Responses API text.format.
      * @return array<string, mixed>
      */
     private function schema(): array
@@ -199,7 +229,7 @@ class OpenAIClient
         return [
             '$schema' => 'http://json-schema.org/draft-07/schema#',
             'type' => 'object',
-            'additionalProperties' => false,
+            'additionalProperties' => false, // REQUIRED by Responses API json_schema
             'properties' => [
                 'route_overview'        => ['type' => 'string'],
                 'total_travel_time'     => ['type' => 'string'],
@@ -229,6 +259,7 @@ class OpenAIClient
                     ],
                 ],
             ],
+            // Responses API requires every key listed in properties to appear in required
             'required' => [
                 'route_overview',
                 'total_travel_time',
@@ -243,21 +274,54 @@ class OpenAIClient
         ];
     }
 
+    /**
+     * Normalize the itinerary so FE is always safe to render/use.
+     * @param array<string, mixed> $x
+     * @return array<string, mixed>
+     */
+    private function normalizeItinerary(array $x): array
+    {
+        $stopsIn = isset($x['stops']) && is_array($x['stops']) ? $x['stops'] : [];
+
+        $stopsOut = [];
+        foreach ($stopsIn as $s) {
+            $stopsOut[] = [
+                'title'           => isset($s['title']) ? (string)$s['title'] : '',
+                'address'         => isset($s['address']) ? (string)$s['address'] : '',
+                'duration'        => isset($s['duration']) ? (string)$s['duration'] : '',
+                'description'     => isset($s['description']) ? (string)$s['description'] : '',
+                'historical_note' => isset($s['historical_note']) ? (string)$s['historical_note'] : '',
+                'challenge'       => isset($s['challenge']) ? (string)$s['challenge'] : '',
+            ];
+        }
+
+        return [
+            'route_overview'       => isset($x['route_overview']) ? (string)$x['route_overview'] : '',
+            'total_travel_time'    => isset($x['total_travel_time']) ? (string)$x['total_travel_time'] : '',
+            'summary'              => isset($x['summary']) ? (string)$x['summary'] : '',
+            'additional_tips'      => isset($x['additional_tips']) ? (string)$x['additional_tips'] : '',
+            'start_location'       => isset($x['start_location']) ? (string)$x['start_location'] : '',
+            'departure_datetime'   => isset($x['departure_datetime']) ? (string)$x['departure_datetime'] : '',
+            'city_of_interest'     => isset($x['city_of_interest']) ? (string)$x['city_of_interest'] : '',
+            'traveler_preferences' => isset($x['traveler_preferences']) ? (string)$x['traveler_preferences'] : '',
+            // id is optional; FE guards it
+            'id'                   => $x['id'] ?? null,
+            'stops'                => $stopsOut,
+        ];
+    }
+
     private function readFromEnvironment(string $key): string
     {
         if (isset($_ENV[$key]) && $_ENV[$key] !== '') {
             return (string) $_ENV[$key];
         }
-
         if (isset($_SERVER[$key]) && $_SERVER[$key] !== '') {
             return (string) $_SERVER[$key];
         }
-
         $value = getenv($key);
         if ($value === false) {
             return '';
         }
-
         return (string) $value;
     }
 }
