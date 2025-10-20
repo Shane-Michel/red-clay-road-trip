@@ -25,3 +25,5 @@ cache/
 
 # PHP server artifacts
 *.pid
+
+package.json
