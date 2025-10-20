@@ -30,14 +30,28 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
 // Pull & trim inputs (supports multipart/form-data from FormData)
 $startLocation     = trim((string)($_POST['start_location'] ?? ''));
 $departureDatetime = trim((string)($_POST['departure_datetime'] ?? ''));
-$cityOfInterest    = trim((string)($_POST['city_of_interest'] ?? ''));
+$citiesInput       = $_POST['cities_of_interest'] ?? [];
 $preferences       = trim((string)($_POST['traveler_preferences'] ?? ''));
+
+if (!is_array($citiesInput)) {
+    $citiesInput = [$citiesInput];
+}
+
+$citiesOfInterest = [];
+foreach ($citiesInput as $city) {
+    $city = trim((string) $city);
+    if ($city !== '') {
+        $citiesOfInterest[] = $city;
+    }
+}
+
+$primaryCity = $citiesOfInterest[0] ?? '';
 
 // Basic validation
 $missing = [];
 if ($startLocation === '')     { $missing[] = 'start_location'; }
 if ($departureDatetime === '') { $missing[] = 'departure_datetime'; }
-if ($cityOfInterest === '')    { $missing[] = 'city_of_interest'; }
+if (!$citiesOfInterest)        { $missing[] = 'cities_of_interest'; }
 
 if ($missing) {
     respond(422, [
@@ -49,7 +63,7 @@ if ($missing) {
 
 // Optional: very light datetime sanity check (does not hard-fail on timezone)
 if (!preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/', $departureDatetime)) {
-    // Don’t hard block—just warn; front-end shows message but can proceed.
+    // Don't hard block—just warn; front-end shows message but can proceed.
     // If you prefer to block, change status to 422 and return.
     Logger::log('generate_trip warning: departure_datetime not ISO-like', [
         'value' => $departureDatetime,
@@ -61,13 +75,22 @@ try {
     $itinerary = $client->generateItinerary([
         'start_location'       => $startLocation,
         'departure_datetime'   => $departureDatetime,
-        'city_of_interest'     => $cityOfInterest,
+        'city_of_interest'     => $primaryCity,
+        'cities_of_interest'   => $citiesOfInterest,
         'traveler_preferences' => $preferences,
     ]);
 
     // Belt-and-suspenders: ensure stops is always an array for the FE
     if (!isset($itinerary['stops']) || !is_array($itinerary['stops'])) {
         $itinerary['stops'] = [];
+    }
+
+    if (!isset($itinerary['cities_of_interest']) || !is_array($itinerary['cities_of_interest']) || !$itinerary['cities_of_interest']) {
+        $itinerary['cities_of_interest'] = $citiesOfInterest;
+    }
+
+    if (!isset($itinerary['city_of_interest']) || trim((string) $itinerary['city_of_interest']) === '') {
+        $itinerary['city_of_interest'] = $primaryCity;
     }
 
     respond(200, ['data' => $itinerary]);
@@ -85,7 +108,7 @@ try {
         'request_context' => [
             'start_location'     => $startLocation,
             'departure_datetime' => $departureDatetime,
-            'city_of_interest'   => $cityOfInterest,
+            'cities_of_interest' => $citiesOfInterest,
         ],
     ]);
 

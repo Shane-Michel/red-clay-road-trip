@@ -29,11 +29,34 @@ try {
     respond(400, ['error' => 'Invalid JSON payload: ' . $exception->getMessage()]);
 }
 
-$required = ['start_location', 'departure_datetime', 'city_of_interest', 'stops'];
+$required = ['start_location', 'departure_datetime', 'stops'];
 foreach ($required as $field) {
     if (empty($input[$field])) {
         respond(422, ['error' => sprintf('Missing field: %s', $field)]);
     }
+}
+
+$citiesRaw = $input['cities_of_interest'] ?? [];
+if (!is_array($citiesRaw)) {
+    $citiesRaw = [$citiesRaw];
+}
+
+$cities = [];
+foreach ($citiesRaw as $city) {
+    $city = trim((string) $city);
+    if ($city !== '') {
+        $cities[] = $city;
+    }
+}
+
+$input['cities_of_interest'] = $cities;
+
+if (empty($input['city_of_interest']) && $cities) {
+    $input['city_of_interest'] = $cities[0];
+}
+
+if (empty($input['city_of_interest'])) {
+    respond(422, ['error' => 'Missing field: cities_of_interest']);
 }
 
 try {

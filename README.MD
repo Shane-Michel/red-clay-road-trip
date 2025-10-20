@@ -1,12 +1,13 @@
 # Red Clay Road Trip
 
-Red Clay Road Trip is a single-page web experience that builds an AI-assisted historical scavenger hunt. Enter your starting point, departure date, and the city you want to explore; the application will request a tailored itinerary from OpenAI and allow you to save and revisit trips using SQLite.
+Red Clay Road Trip is a single-page web experience that builds an AI-assisted adventure through the South. Enter your starting point, departure date, and the cities you want to explore; the application will request a tailored itinerary from OpenAI and allow you to save and revisit trips using SQLite.
 
 ## Features
 
 - **AI-generated itineraries** powered by the OpenAI Responses API.
 - **Rich client experience** with a responsive layout, dark-mode support, and dynamic rendering.
 - **Trip history** stored locally in SQLite so returning visitors can revisit or reload previous adventures.
+- **Beyond history**: every stop now includes fun facts, can't-miss highlights, and hidden bites in addition to contextual stories.
 
 ## Getting started
 
@@ -44,7 +45,7 @@ The first request will automatically create the SQLite database at `data/trips.s
 ## API endpoints
 
 - `POST /api/generate_trip.php`
-  - Accepts form-data fields (`start_location`, `departure_datetime`, `city_of_interest`, and optional `traveler_preferences`).
+  - Accepts form-data fields (`start_location`, `departure_datetime`, `cities_of_interest[]`, and optional `traveler_preferences`).
   - Calls OpenAI to generate a JSON itinerary structure.
 - `POST /api/save_trip.php`
   - Accepts a JSON itinerary from the front-end and stores it in SQLite.

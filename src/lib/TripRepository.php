@@ -33,7 +33,9 @@ SQL;
 
     public static function saveTrip(array $itinerary): int
     {
+        $normalized = $itinerary;
         try {
+            $normalized = self::prepareForPersistence($itinerary);
             $db = self::getConnection();
             $sql = <<<'SQL'
 INSERT INTO trips (
@@ -57,11 +59,11 @@ SQL;
             $stmt = $db->prepare($sql);
 
             $stmt->execute([
-                ':start_location' => $itinerary['start_location'],
-                ':departure_datetime' => $itinerary['departure_datetime'],
-                ':city_of_interest' => $itinerary['city_of_interest'],
-                ':itinerary_json' => json_encode($itinerary, JSON_THROW_ON_ERROR),
-                ':summary' => $itinerary['summary'] ?? substr($itinerary['route_overview'] ?? '', 0, 200),
+                ':start_location' => $normalized['start_location'],
+                ':departure_datetime' => $normalized['departure_datetime'],
+                ':city_of_interest' => $normalized['city_of_interest'],
+                ':itinerary_json' => json_encode($normalized, JSON_THROW_ON_ERROR),
+                ':summary' => $normalized['summary'] ?? substr($normalized['route_overview'] ?? '', 0, 200),
                 ':created_at' => (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format(\DateTimeInterface::ATOM),
             ]);
 
@@ -70,9 +72,10 @@ SQL;
             Logger::logThrowable($exception, [
                 'repository_method' => __METHOD__,
                 'itinerary_context' => [
-                    'start_location' => $itinerary['start_location'] ?? null,
-                    'departure_datetime' => $itinerary['departure_datetime'] ?? null,
-                    'city_of_interest' => $itinerary['city_of_interest'] ?? null,
+                    'start_location' => $normalized['start_location'] ?? null,
+                    'departure_datetime' => $normalized['departure_datetime'] ?? null,
+                    'city_of_interest' => $normalized['city_of_interest'] ?? null,
+                    'cities_of_interest' => $normalized['cities_of_interest'] ?? null,
                 ],
             ]);
             throw $exception;
@@ -81,7 +84,9 @@ SQL;
 
     public static function updateTrip(int $id, array $itinerary): bool
     {
+        $normalized = $itinerary;
         try {
+            $normalized = self::prepareForPersistence($itinerary);
             $db = self::getConnection();
             $sql = <<<'SQL'
 UPDATE trips
@@ -97,17 +102,18 @@ SQL;
             $stmt = $db->prepare($sql);
 
             return $stmt->execute([
-                ':start_location' => $itinerary['start_location'],
-                ':departure_datetime' => $itinerary['departure_datetime'],
-                ':city_of_interest' => $itinerary['city_of_interest'],
-                ':itinerary_json' => json_encode($itinerary, JSON_THROW_ON_ERROR),
-                ':summary' => $itinerary['summary'] ?? substr($itinerary['route_overview'] ?? '', 0, 200),
+                ':start_location' => $normalized['start_location'],
+                ':departure_datetime' => $normalized['departure_datetime'],
+                ':city_of_interest' => $normalized['city_of_interest'],
+                ':itinerary_json' => json_encode($normalized, JSON_THROW_ON_ERROR),
+                ':summary' => $normalized['summary'] ?? substr($normalized['route_overview'] ?? '', 0, 200),
                 ':id' => $id,
             ]);
         } catch (\Throwable $exception) {
             Logger::logThrowable($exception, [
                 'repository_method' => __METHOD__,
                 'trip_id' => $id,
+                'cities_of_interest' => $normalized['cities_of_interest'] ?? null,
             ]);
             throw $exception;
         }
@@ -127,7 +133,8 @@ SELECT
     departure_datetime,
     city_of_interest,
     summary,
-    created_at
+    created_at,
+    itinerary_json
 FROM trips
 ORDER BY created_at DESC
 LIMIT 12
@@ -137,6 +144,29 @@ SQL;
             $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
             return array_map(static function (array $row): array {
                 $row['created_at'] = (new \DateTimeImmutable($row['created_at']))->setTimezone(new \DateTimeZone('UTC'))->format(\DateTimeInterface::ATOM);
+                $row['cities_of_interest'] = [];
+                if (!empty($row['itinerary_json'])) {
+                    try {
+                        $decoded = json_decode($row['itinerary_json'], true, 512, JSON_THROW_ON_ERROR);
+                        if (isset($decoded['cities_of_interest']) && is_array($decoded['cities_of_interest'])) {
+                            $row['cities_of_interest'] = array_values(array_filter(array_map(static function ($city) {
+                                $city = trim((string) $city);
+                                return $city === '' ? null : $city;
+                            }, $decoded['cities_of_interest'])));
+                            if ($row['cities_of_interest']) {
+                                $row['city_of_interest'] = implode(' • ', $row['cities_of_interest']);
+                            }
+                        }
+                    } catch (\Throwable $e) {
+                        // If decoding fails, we keep defaults but still log for observability.
+                        Logger::logThrowable($e, [
+                            'repository_method' => __METHOD__,
+                            'stage' => 'decode_itinerary_preview',
+                            'trip_id' => $row['id'] ?? null,
+                        ]);
+                    }
+                }
+                unset($row['itinerary_json']);
                 return $row;
             }, $rows ?: []);
         } catch (\Throwable $exception) {
@@ -211,5 +241,27 @@ SQL;
             Logger::logThrowable($exception, ['repository_method' => __METHOD__]);
             throw $exception;
         }
+    }
+
+    private static function prepareForPersistence(array $itinerary): array
+    {
+        $cities = [];
+        if (isset($itinerary['cities_of_interest']) && is_array($itinerary['cities_of_interest'])) {
+            foreach ($itinerary['cities_of_interest'] as $city) {
+                $city = trim((string) $city);
+                if ($city !== '') {
+                    $cities[] = $city;
+                }
+            }
+        }
+
+        $itinerary['cities_of_interest'] = $cities;
+        $primaryCity = isset($itinerary['city_of_interest']) ? trim((string) $itinerary['city_of_interest']) : '';
+        if ($primaryCity === '' && $cities) {
+            $primaryCity = $cities[0];
+        }
+        $itinerary['city_of_interest'] = $primaryCity;
+
+        return $itinerary;
     }
 }

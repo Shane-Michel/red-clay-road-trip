@@ -23,14 +23,14 @@ TripRepository::initialize();
         <div class="hero__overlay"></div>
         <div class="hero__content container">
             <h1>Red Clay Road Trip</h1>
-            <p>Design a historical scavenger hunt and uncover stories hidden along the road.</p>
+            <p>Design a road trip that blends stories, local legends, fun facts, and hidden bites along the way.</p>
         </div>
     </header>
     <main class="container">
         <section class="planner" aria-labelledby="planner-title">
             <div class="planner__intro">
-                <h2 id="planner-title">Plan Your Historical Adventure</h2>
-                <p>Enter your starting point, when you're traveling, and the city you want to explore. Our AI historian will craft a road trip filled with intriguing stops and history-rich discoveries.</p>
+                <h2 id="planner-title">Plan Your Story-Filled Adventure</h2>
+                <p>Enter your starting point, when you're traveling, and the cities you want to explore. Our AI travel host will craft a road trip packed with fun facts, must-see spots, and hidden places to eat.</p>
             </div>
             <form id="trip-form" class="planner__form" autocomplete="off">
                 <div class="field">
@@ -42,12 +42,18 @@ TripRepository::initialize();
                     <input type="datetime-local" id="departure_datetime" name="departure_datetime" required />
                 </div>
                 <div class="field">
-                    <label for="city_of_interest">City of Interest</label>
-                    <input type="text" id="city_of_interest" name="city_of_interest" placeholder="e.g., Savannah, GA" required />
+                    <label for="cities-of-interest">Cities to Explore</label>
+                    <div id="cities-of-interest" class="field__group">
+                        <div class="field__repeatable" data-city-index="0">
+                            <input type="text" name="cities_of_interest[]" placeholder="e.g., Savannah, GA" required />
+                        </div>
+                    </div>
+                    <button type="button" id="add-city" class="btn btn--ghost field__action">Add Another City</button>
+                    <p class="field__help">List every city or town you'd like to include. We'll weave them into one continuous route.</p>
                 </div>
                 <div class="field field--textarea">
                     <label for="traveler_preferences">Traveler Preferences <span class="optional">(optional)</span></label>
-                    <textarea id="traveler_preferences" name="traveler_preferences" placeholder="Share accessibility needs, interests, or travel companions."></textarea>
+                    <textarea id="traveler_preferences" name="traveler_preferences" placeholder="Share accessibility needs, interests, travel companions, or must-try flavors."></textarea>
                 </div>
                 <button type="submit" class="btn">Generate Road Trip</button>
             </form>

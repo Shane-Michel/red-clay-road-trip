@@ -42,7 +42,22 @@ final class OpenAIClient
         // Read fields defensively to avoid PHP notices
         $start = (string)($payload['start_location'] ?? '');
         $depart = (string)($payload['departure_datetime'] ?? '');
+        $citiesRaw = $payload['cities_of_interest'] ?? [];
+        if (!is_array($citiesRaw)) {
+            $citiesRaw = [$citiesRaw];
+        }
+        $cities = [];
+        foreach ($citiesRaw as $cityName) {
+            $cityName = trim((string) $cityName);
+            if ($cityName !== '') {
+                $cities[] = $cityName;
+            }
+        }
         $city = (string)($payload['city_of_interest'] ?? '');
+        if ($city === '' && $cities) {
+            $city = $cities[0];
+        }
+        $cityList = $cities ? implode(', ', $cities) : $city;
         $prefs = (string)($payload['traveler_preferences'] ?? 'None provided');
 
         $requestBody = [
@@ -50,17 +65,19 @@ final class OpenAIClient
             'input' => [
                 [
                     'role' => 'system',
-                    'content' => 'You are a travel historian who designs detailed, accessible scavenger hunts for road trips.',
+                    'content' => 'You are a travel concierge who blends regional history, quirky discoveries, and foodie finds into road trip itineraries.',
                 ],
                 [
                     'role' => 'user',
                     'content' => sprintf(
-                        "Plan a historical road trip scavenger hunt.\n\n".
-                        "Start location: %s\nDeparture: %s\nCity of interest: %s\nPreferences: %s\n\n".
-                        "Provide an overview, driving segments, 4-6 stops with history challenges, travel tips, and accessibility notes.",
+                        "Plan a story-rich road trip that mixes history, fun facts, hidden gems, and memorable food stops.\n\n" .
+                        "Start location: %s\nDeparture: %s\nCities to explore: %s\nTraveler preferences: %s\n\n" .
+                        "Provide a route overview, total drive time, and 4-6 stops that follow the cities in a logical order. " .
+                        "For each stop include: title, address, suggested duration, engaging description, story or cultural context, a fun fact, a highlight (interesting place or experience), a hidden bite (local food or drink pick), and a lighthearted challenge. " .
+                        "Close with practical travel tips and reminders.",
                         $start,
                         $depart,
-                        $city,
+                        $cityList,
                         $prefs
                     ),
                 ],
@@ -84,6 +101,7 @@ final class OpenAIClient
                     'start_location' => $start,
                     'departure_datetime' => $depart,
                     'city_of_interest' => $city,
+                    'cities_of_interest' => $cities,
                 ],
             ]);
             throw $exception;
@@ -263,6 +281,11 @@ final class OpenAIClient
                 'start_location'        => ['type' => 'string'],
                 'departure_datetime'    => ['type' => 'string'],
                 'city_of_interest'      => ['type' => 'string'],
+                'cities_of_interest'    => [
+                    'type' => 'array',
+                    'minItems' => 1,
+                    'items' => ['type' => 'string'],
+                ],
                 'traveler_preferences'  => ['type' => 'string'],
                 'stops' => [
                     'type' => 'array',
@@ -277,9 +300,12 @@ final class OpenAIClient
                             'description'     => ['type' => 'string'],
                             'historical_note' => ['type' => 'string'],
                             'challenge'       => ['type' => 'string'],
+                            'fun_fact'        => ['type' => 'string'],
+                            'highlight'       => ['type' => 'string'],
+                            'food_pick'       => ['type' => 'string'],
                         ],
                         'required' => [
-                            'title','address','duration','description','historical_note','challenge'
+                            'title','address','duration','description','historical_note','challenge','fun_fact','highlight','food_pick'
                         ],
                     ],
                 ],
@@ -293,6 +319,7 @@ final class OpenAIClient
                 'start_location',
                 'departure_datetime',
                 'city_of_interest',
+                'cities_of_interest',
                 'traveler_preferences',
                 'stops'
             ],
@@ -307,6 +334,16 @@ final class OpenAIClient
     private function normalizeItinerary(array $x): array
     {
         $stopsIn = isset($x['stops']) && is_array($x['stops']) ? $x['stops'] : [];
+        $citiesIn = isset($x['cities_of_interest']) && is_array($x['cities_of_interest']) ? $x['cities_of_interest'] : [];
+        $citiesOut = [];
+        foreach ($citiesIn as $city) {
+            $city = trim((string) $city);
+            if ($city !== '') {
+                $citiesOut[] = $city;
+            }
+        }
+
+        $citiesOut = array_values($citiesOut);
 
         $stopsOut = [];
         foreach ($stopsIn as $s) {
@@ -317,7 +354,15 @@ final class OpenAIClient
                 'description'     => isset($s['description']) ? (string)$s['description'] : '',
                 'historical_note' => isset($s['historical_note']) ? (string)$s['historical_note'] : '',
                 'challenge'       => isset($s['challenge']) ? (string)$s['challenge'] : '',
+                'fun_fact'        => isset($s['fun_fact']) ? (string)$s['fun_fact'] : '',
+                'highlight'       => isset($s['highlight']) ? (string)$s['highlight'] : '',
+                'food_pick'       => isset($s['food_pick']) ? (string)$s['food_pick'] : '',
             ];
+        }
+
+        $primaryCity = isset($x['city_of_interest']) ? (string)$x['city_of_interest'] : '';
+        if ($primaryCity === '' && $citiesOut) {
+            $primaryCity = $citiesOut[0];
         }
 
         return [
@@ -327,7 +372,8 @@ final class OpenAIClient
             'additional_tips'      => isset($x['additional_tips']) ? (string)$x['additional_tips'] : '',
             'start_location'       => isset($x['start_location']) ? (string)$x['start_location'] : '',
             'departure_datetime'   => isset($x['departure_datetime']) ? (string)$x['departure_datetime'] : '',
-            'city_of_interest'     => isset($x['city_of_interest']) ? (string)$x['city_of_interest'] : '',
+            'city_of_interest'     => $primaryCity,
+            'cities_of_interest'   => $citiesOut,
             'traveler_preferences' => isset($x['traveler_preferences']) ? (string)$x['traveler_preferences'] : '',
             // id is optional; FE guards it
             'id'                   => $x['id'] ?? null,

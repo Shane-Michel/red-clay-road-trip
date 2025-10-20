@@ -113,6 +113,41 @@ body {
     resize: vertical;
 }
 
+.field__group {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.field__repeatable {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.field__repeatable input[type="text"] {
+    flex: 1;
+}
+
+.field__action {
+    margin-top: 0.75rem;
+}
+
+.field__help {
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+}
+
+.field__remove {
+    padding: 0.5rem 1rem;
+    border-radius: 999px;
+}
+
+.field__remove[hidden] {
+    display: none;
+}
+
 .optional {
     color: var(--muted);
     font-size: 0.9rem;

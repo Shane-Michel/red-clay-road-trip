@@ -45,6 +45,7 @@ function normalizeTrip(array $trip): array
         'start_location' => '',
         'departure_datetime' => '',
         'city_of_interest' => '',
+        'cities_of_interest' => [],
         'traveler_preferences' => '',
         'stops' => [],
     ];
@@ -57,6 +58,9 @@ function normalizeTrip(array $trip): array
             'description' => '',
             'historical_note' => '',
             'challenge' => '',
+            'fun_fact' => '',
+            'highlight' => '',
+            'food_pick' => '',
         ];
         return array_merge($stopDefaults, is_array($stop) ? $stop : []);
     }, $trip['stops']);
@@ -85,7 +89,8 @@ function normalizeTrip(array $trip): array
                 <p><strong>Total Travel Time:</strong> <?= escape($trip['total_travel_time'] ?: '—') ?></p>
                 <p><strong>Departure:</strong> <?= escape($trip['departure_datetime'] ?: '—') ?></p>
                 <p><strong>Starting From:</strong> <?= escape($trip['start_location'] ?: '—') ?></p>
-                <p><strong>City of Interest:</strong> <?= escape($trip['city_of_interest'] ?: '—') ?></p>
+                <?php $cityLabel = $trip['cities_of_interest'] ? implode(', ', $trip['cities_of_interest']) : $trip['city_of_interest']; ?>
+                <p><strong>Cities to Explore:</strong> <?= escape($cityLabel ?: '—') ?></p>
             </article>
 
             <?php if ($trip['summary']): ?>
@@ -100,10 +105,19 @@ function normalizeTrip(array $trip): array
                         <p><?= nl2br(escape($stop['description'])) ?></p>
                     <?php endif; ?>
                     <?php if ($stop['historical_note']): ?>
-                        <p><strong>Historical Significance:</strong> <?= nl2br(escape($stop['historical_note'])) ?></p>
+                        <p><strong>Story or Significance:</strong> <?= nl2br(escape($stop['historical_note'])) ?></p>
                     <?php endif; ?>
                     <?php if ($stop['challenge']): ?>
                         <p><strong>Challenge:</strong> <?= nl2br(escape($stop['challenge'])) ?></p>
+                    <?php endif; ?>
+                    <?php if ($stop['fun_fact']): ?>
+                        <p><strong>Fun Fact:</strong> <?= nl2br(escape($stop['fun_fact'])) ?></p>
+                    <?php endif; ?>
+                    <?php if ($stop['highlight']): ?>
+                        <p><strong>Don't Miss:</strong> <?= nl2br(escape($stop['highlight'])) ?></p>
+                    <?php endif; ?>
+                    <?php if ($stop['food_pick']): ?>
+                        <p><strong>Hidden Bite:</strong> <?= nl2br(escape($stop['food_pick'])) ?></p>
                     <?php endif; ?>
                 </article>
             <?php endforeach; ?>
