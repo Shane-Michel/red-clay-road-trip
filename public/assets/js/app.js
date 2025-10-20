@@ -17,6 +17,8 @@ const editorSection = document.getElementById('itinerary-editor');
 const editorStops = document.getElementById('editor-stops');
 const addStopButton = document.getElementById('add-stop');
 const applyEditsButton = document.getElementById('apply-edits');
+const citiesContainer = document.getElementById('cities-of-interest');
+const addCityButton = document.getElementById('add-city');
 
 let mapInstance = null;
 let mapMarkers = [];
@@ -147,6 +149,9 @@ async function updateMap(trip) {
   const safeTrip = (trip && typeof trip === 'object') ? trip : {};
   const points = [];
   const stops = Array.isArray(safeTrip.stops) ? safeTrip.stops : [];
+  const cityFallback = Array.isArray(safeTrip.cities_of_interest) && safeTrip.cities_of_interest.length
+    ? safeTrip.cities_of_interest[0]
+    : safeTrip.city_of_interest;
 
   if (safeTrip.start_location) {
     points.push({ label: 'Start', description: safeTrip.start_location });
@@ -154,7 +159,7 @@ async function updateMap(trip) {
 
   stops.forEach((stop, index) => {
     const stopLabel = `Stop ${index + 1}: ${stop?.title || stop?.address || 'Scheduled stop'}`;
-    const lookup = stop?.address || stop?.title || safeTrip.city_of_interest || '';
+    const lookup = stop?.address || stop?.title || cityFallback || '';
     points.push({ label: stopLabel, description: lookup });
   });
 
@@ -223,6 +228,10 @@ async function fetchJSON(url, options) {
 function normalizeItinerary(x) {
   const obj = (x && typeof x === 'object') ? x : {};
   const stops = Array.isArray(obj.stops) ? obj.stops : [];
+  const cities = Array.isArray(obj.cities_of_interest)
+    ? obj.cities_of_interest.map((city) => String(city ?? '').trim()).filter((city) => city !== '')
+    : [];
+  const primaryCity = String(obj.city_of_interest ?? '').trim() || (cities.length ? cities[0] : '');
   return {
     route_overview: String(obj.route_overview ?? ''),
     total_travel_time: String(obj.total_travel_time ?? ''),
@@ -230,7 +239,8 @@ function normalizeItinerary(x) {
     additional_tips: String(obj.additional_tips ?? ''),
     start_location: String(obj.start_location ?? ''),
     departure_datetime: String(obj.departure_datetime ?? ''),
-    city_of_interest: String(obj.city_of_interest ?? ''),
+    city_of_interest: primaryCity,
+    cities_of_interest: cities,
     traveler_preferences: String(obj.traveler_preferences ?? ''),
     id: obj.id ?? '',
     stops: stops.map((stop) => ({
@@ -240,6 +250,9 @@ function normalizeItinerary(x) {
       description: String(stop?.description ?? ''),
       historical_note: String(stop?.historical_note ?? ''),
       challenge: String(stop?.challenge ?? ''),
+      fun_fact: String(stop?.fun_fact ?? ''),
+      highlight: String(stop?.highlight ?? ''),
+      food_pick: String(stop?.food_pick ?? ''),
     })),
   };
 }
@@ -260,7 +273,52 @@ function escapeHtml(value) {
 }
 
 function createEmptyStop() {
-  return { title: '', address: '', duration: '', description: '', historical_note: '', challenge: '' };
+  return {
+    title: '',
+    address: '',
+    duration: '',
+    description: '',
+    historical_note: '',
+    challenge: '',
+    fun_fact: '',
+    highlight: '',
+    food_pick: '',
+  };
+}
+
+function createCityField(value = '') {
+  if (!citiesContainer) return null;
+  const wrapper = document.createElement('div');
+  wrapper.className = 'field__repeatable';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.name = 'cities_of_interest[]';
+  input.required = true;
+  input.placeholder = 'e.g., Savannah, GA';
+  if (value) input.value = value;
+  wrapper.appendChild(input);
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'btn btn--ghost field__remove';
+  remove.textContent = 'Remove';
+  remove.dataset.action = 'remove-city';
+  wrapper.appendChild(remove);
+
+  return wrapper;
+}
+
+function refreshCityRemoveButtons() {
+  if (!citiesContainer) return;
+  const wrappers = Array.from(citiesContainer.querySelectorAll('.field__repeatable'));
+  wrappers.forEach((wrapper) => {
+    const remove = wrapper.querySelector('[data-action="remove-city"]');
+    if (!remove) return;
+    const disabled = wrappers.length === 1;
+    remove.disabled = disabled;
+    remove.hidden = disabled;
+  });
 }
 
 /* ---------------------------- Rendering UI ----------------------------- */
@@ -287,6 +345,15 @@ function renderTripDetails(trip) {
   travelLabel.textContent = 'Total Travel Time: ';
   travelTime.append(travelLabel, document.createTextNode(safeTrip.total_travel_time || '—'));
   intro.appendChild(travelTime);
+
+  const cityLine = document.createElement('p');
+  const cityLabel = document.createElement('strong');
+  cityLabel.textContent = 'Cities to Explore: ';
+  const cityNames = (Array.isArray(safeTrip.cities_of_interest) && safeTrip.cities_of_interest.length)
+    ? safeTrip.cities_of_interest.join(' • ')
+    : (safeTrip.city_of_interest || '—');
+  cityLine.append(cityLabel, document.createTextNode(cityNames));
+  intro.appendChild(cityLine);
 
   itineraryContainer.appendChild(intro);
 
@@ -327,7 +394,7 @@ function renderTripDetails(trip) {
     if (stop?.historical_note) {
       const historical = document.createElement('p');
       const label = document.createElement('strong');
-      label.textContent = 'Historical Significance: ';
+      label.textContent = 'Story or significance: ';
       historical.append(label, document.createTextNode(stop.historical_note));
       article.appendChild(historical);
     }
@@ -338,6 +405,30 @@ function renderTripDetails(trip) {
       label.textContent = 'Challenge: ';
       challenge.append(label, document.createTextNode(stop.challenge));
       article.appendChild(challenge);
+    }
+
+    if (stop?.fun_fact) {
+      const funFact = document.createElement('p');
+      const label = document.createElement('strong');
+      label.textContent = 'Fun fact: ';
+      funFact.append(label, document.createTextNode(stop.fun_fact));
+      article.appendChild(funFact);
+    }
+
+    if (stop?.highlight) {
+      const highlight = document.createElement('p');
+      const label = document.createElement('strong');
+      label.textContent = "Don't miss: ";
+      highlight.append(label, document.createTextNode(stop.highlight));
+      article.appendChild(highlight);
+    }
+
+    if (stop?.food_pick) {
+      const food = document.createElement('p');
+      const label = document.createElement('strong');
+      label.textContent = 'Hidden bite: ';
+      food.append(label, document.createTextNode(stop.food_pick));
+      article.appendChild(food);
     }
 
     itineraryContainer.appendChild(article);
@@ -421,8 +512,11 @@ function buildEditor() {
       { label: 'Address or area', field: 'address', type: 'text', placeholder: 'Address or neighborhood' },
       { label: 'Suggested time', field: 'duration', type: 'text', placeholder: 'e.g., 90 minutes' },
       { label: 'Description', field: 'description', type: 'textarea', placeholder: 'What should travelers explore here?' },
-      { label: 'Historical significance', field: 'historical_note', type: 'textarea', placeholder: 'Key facts or stories' },
+      { label: 'Story or significance', field: 'historical_note', type: 'textarea', placeholder: 'Key facts, legends, or context' },
       { label: 'Challenge', field: 'challenge', type: 'textarea', placeholder: 'Optional activity or prompt' },
+      { label: 'Fun fact', field: 'fun_fact', type: 'textarea', placeholder: 'Surprising tidbit or local lore' },
+      { label: "Don't miss", field: 'highlight', type: 'textarea', placeholder: 'Interesting place or experience nearby' },
+      { label: 'Hidden bite', field: 'food_pick', type: 'textarea', placeholder: 'Under-the-radar food or drink stop' },
     ];
 
     fields.forEach((cfg) => {
@@ -598,7 +692,10 @@ function renderHistory(trips) {
 
   trips.forEach((trip) => {
     const clone = historyTemplate.content.firstElementChild.cloneNode(true);
-    const title = `${trip?.city_of_interest ?? '—'} from ${trip?.start_location ?? '—'}`;
+    const cityLabel = Array.isArray(trip?.cities_of_interest) && trip.cities_of_interest.length
+      ? trip.cities_of_interest.join(' • ')
+      : (trip?.city_of_interest ?? '—');
+    const title = `${cityLabel} from ${trip?.start_location ?? '—'}`;
     const when = trip?.created_at ? new Date(trip.created_at).toLocaleString() : '';
 
     clone.querySelector('h3').textContent = title;
@@ -620,6 +717,58 @@ async function loadHistory() {
 }
 
 /* ----------------------------- Event wiring ---------------------------- */
+
+if (citiesContainer) {
+  const wrappers = Array.from(citiesContainer.querySelectorAll('.field__repeatable'));
+  if (!wrappers.length) {
+    const field = createCityField();
+    if (field) citiesContainer.appendChild(field);
+  } else {
+    wrappers.forEach((wrapper) => {
+      if (!wrapper.querySelector('input[name="cities_of_interest[]"]')) {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.name = 'cities_of_interest[]';
+        input.required = true;
+        input.placeholder = 'e.g., Savannah, GA';
+        wrapper.appendChild(input);
+      }
+      if (!wrapper.querySelector('[data-action="remove-city"]')) {
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'btn btn--ghost field__remove';
+        remove.textContent = 'Remove';
+        remove.dataset.action = 'remove-city';
+        wrapper.appendChild(remove);
+      }
+    });
+  }
+  refreshCityRemoveButtons();
+}
+
+if (addCityButton && citiesContainer) {
+  addCityButton.addEventListener('click', () => {
+    const field = createCityField();
+    if (!field) return;
+    citiesContainer.appendChild(field);
+    refreshCityRemoveButtons();
+    const input = field.querySelector('input');
+    if (input) input.focus();
+  });
+}
+
+if (citiesContainer) {
+  citiesContainer.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-action="remove-city"]');
+    if (!button) return;
+    const wrapper = button.closest('.field__repeatable');
+    if (!wrapper) return;
+    const wrappers = Array.from(citiesContainer.querySelectorAll('.field__repeatable'));
+    if (wrappers.length <= 1) return;
+    wrapper.remove();
+    refreshCityRemoveButtons();
+  });
+}
 
 if (form) {
   form.addEventListener('submit', async (event) => {

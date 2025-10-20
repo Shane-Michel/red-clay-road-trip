@@ -18,7 +18,10 @@ final class ItineraryExporter
             'CALSCALE:GREGORIAN',
         ];
 
-        $summary = $trip['summary'] ?: sprintf('Road trip through %s', $trip['city_of_interest']);
+        $citySummary = !empty($trip['cities_of_interest'])
+            ? implode(', ', (array) $trip['cities_of_interest'])
+            : $trip['city_of_interest'];
+        $summary = $trip['summary'] ?: sprintf('Road trip through %s', $citySummary ?: 'your chosen cities');
         $descriptionParts = array_filter([
             $trip['route_overview'],
             $trip['total_travel_time'],
@@ -43,8 +46,11 @@ final class ItineraryExporter
             $details = array_filter([
                 $stop['address'],
                 $stop['description'],
-                $stop['historical_note'] ? 'History: ' . $stop['historical_note'] : '',
+                $stop['historical_note'] ? 'Story: ' . $stop['historical_note'] : '',
                 $stop['challenge'] ? 'Challenge: ' . $stop['challenge'] : '',
+                $stop['fun_fact'] ? 'Fun fact: ' . $stop['fun_fact'] : '',
+                $stop['highlight'] ? "Don't miss: " . $stop['highlight'] : '',
+                $stop['food_pick'] ? 'Hidden bite: ' . $stop['food_pick'] : '',
             ]);
             if ($details) {
                 $eventLines[] = self::foldLine('DESCRIPTION:' . self::escapeText(implode(' \n', $details)));
@@ -68,7 +74,7 @@ final class ItineraryExporter
         if ($descriptionParts) {
             $tripEvent[] = self::foldLine('DESCRIPTION:' . self::escapeText(implode(' \n', $descriptionParts)));
         }
-        $tripEvent[] = self::foldLine('LOCATION:' . self::escapeText($trip['start_location'] ?: $trip['city_of_interest']));
+        $tripEvent[] = self::foldLine('LOCATION:' . self::escapeText($trip['start_location'] ?: $citySummary));
         $tripEvent[] = 'END:VEVENT';
 
         $lines = array_merge($lines, $tripEvent);
@@ -92,7 +98,10 @@ final class ItineraryExporter
         $lines[] = 'Travel Time: ' . ($trip['total_travel_time'] ?: '—');
         $lines[] = 'Departure: ' . ($trip['departure_datetime'] ?: '—');
         $lines[] = 'Starting From: ' . ($trip['start_location'] ?: '—');
-        $lines[] = 'City of Interest: ' . ($trip['city_of_interest'] ?: '—');
+        $cityLabel = !empty($trip['cities_of_interest'])
+            ? implode(', ', (array) $trip['cities_of_interest'])
+            : $trip['city_of_interest'];
+        $lines[] = 'Cities to Explore: ' . ($cityLabel ?: '—');
         if ($trip['traveler_preferences']) {
             $lines[] = 'Traveler Notes: ' . $trip['traveler_preferences'];
         }
@@ -110,10 +119,19 @@ final class ItineraryExporter
                 $lines[] = 'Details: ' . $stop['description'];
             }
             if ($stop['historical_note']) {
-                $lines[] = 'Historical note: ' . $stop['historical_note'];
+                $lines[] = 'Story or significance: ' . $stop['historical_note'];
             }
             if ($stop['challenge']) {
                 $lines[] = 'Challenge: ' . $stop['challenge'];
+            }
+            if ($stop['fun_fact']) {
+                $lines[] = 'Fun fact: ' . $stop['fun_fact'];
+            }
+            if ($stop['highlight']) {
+                $lines[] = "Don't miss: " . $stop['highlight'];
+            }
+            if ($stop['food_pick']) {
+                $lines[] = 'Hidden bite: ' . $stop['food_pick'];
             }
         }
 
@@ -211,6 +229,7 @@ final class ItineraryExporter
             'start_location' => '',
             'departure_datetime' => '',
             'city_of_interest' => '',
+            'cities_of_interest' => [],
             'traveler_preferences' => '',
             'stops' => [],
         ];
@@ -223,6 +242,9 @@ final class ItineraryExporter
                 'description' => '',
                 'historical_note' => '',
                 'challenge' => '',
+                'fun_fact' => '',
+                'highlight' => '',
+                'food_pick' => '',
             ];
             return array_merge($stopDefaults, is_array($stop) ? $stop : []);
         }, $trip['stops']);
