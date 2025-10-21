@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 2) . '/src/bootstrap.php';
 require_once dirname(__DIR__, 2) . '/src/lib/TripRepository.php';
+require_once dirname(__DIR__, 2) . '/src/lib/UserScope.php';
 
 header('Content-Type: application/json');
 
-TripRepository::initialize();
+$scope = UserScope::fromRequest();
+$scope->persist();
+TripRepository::initialize($scope);
 
 $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 if ($id <= 0) {
@@ -17,7 +20,7 @@ if ($id <= 0) {
 }
 
 try {
-    $trip = TripRepository::getTrip($id);
+    $trip = TripRepository::getTrip($scope, $id);
     if ($trip === null) {
         http_response_code(404);
         echo json_encode(['error' => 'Trip not found']);
@@ -29,6 +32,7 @@ try {
     Logger::logThrowable($exception, [
         'endpoint' => 'get_trip',
         'trip_id' => $id,
+        'scope' => $scope->storageKey(),
     ]);
     http_response_code(500);
     echo json_encode(['error' => $exception->getMessage()]);

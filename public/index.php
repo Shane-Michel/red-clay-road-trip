@@ -5,9 +5,12 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/src/bootstrap.php';
 require_once dirname(__DIR__) . '/src/lib/OpenAIClient.php';
 require_once dirname(__DIR__) . '/src/lib/TripRepository.php';
+require_once dirname(__DIR__) . '/src/lib/UserScope.php';
 
 // Ensure database is initialized
-TripRepository::initialize();
+$scope = UserScope::fromRequest();
+$scope->persist();
+TripRepository::initialize($scope);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -27,6 +30,29 @@ TripRepository::initialize();
         </div>
     </header>
     <main class="container">
+        <section class="account" aria-labelledby="account-title">
+            <div class="account__header">
+                <h2 id="account-title">Traveler Account (optional)</h2>
+                <p>Use a private sync key to keep your itineraries separate. Share the key with another device to view the same history.</p>
+            </div>
+            <div class="account__status" id="account-status" role="status" aria-live="polite"></div>
+            <div class="account__controls">
+                <div class="account__row">
+                    <label for="account-key" class="account__label">Your sync key</label>
+                    <div class="account__input-group">
+                        <input type="text" id="account-key" autocomplete="off" inputmode="text" spellcheck="false" placeholder="Enter an existing key to sign in" />
+                        <button type="button" id="account-apply" class="btn btn--secondary">Use key</button>
+                    </div>
+                </div>
+                <div class="account__actions">
+                    <button type="button" id="account-generate" class="btn">Generate new private key</button>
+                    <button type="button" id="account-copy" class="btn btn--ghost" hidden>Copy key</button>
+                    <button type="button" id="account-reset" class="btn btn--ghost">Use shared demo space</button>
+                </div>
+                <p class="account__hint">Keys never leave your browser except when you send requests with them. They are hashed on the server before storage so other travelers can't see your trips.</p>
+            </div>
+        </section>
+
         <section class="planner" aria-labelledby="planner-title">
             <div class="planner__intro">
                 <h2 id="planner-title">Plan Your Story-Filled Adventure</h2>
