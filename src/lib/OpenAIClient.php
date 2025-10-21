@@ -7,6 +7,10 @@ require_once __DIR__ . '/Logger.php';
 final class OpenAIClient
 {
     private const MAX_ATTEMPTS = 3;
+    private const CACHE_TTL_SECONDS = 900; // 15 minutes
+    private const CACHE_MAX_ENTRIES = 32;
+    private const RATE_LIMIT_INTERVAL = 60; // seconds
+    private const RATE_LIMIT_MAX_REQUESTS = 12; // sliding window per minute
 
     /** @var string */
     private $apiKey;
@@ -174,6 +178,41 @@ final class OpenAIClient
             throw $exception;
         }
 
+        $signature = hash('sha256', $encodedBody);
+        $cacheDir = $this->cacheDirectory();
+
+        $cached = $this->readCachedResponse($cacheDir, $signature);
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        $lockHandle = $this->acquireLock($cacheDir, $signature);
+
+        try {
+            // Another request may have primed the cache while we waited for the lock.
+            $cached = $this->readCachedResponse($cacheDir, $signature);
+            if ($cached !== null) {
+                return $cached;
+            }
+
+            $this->enforceRateLimit($cacheDir);
+
+            $response = $this->dispatchRequest($encodedBody);
+            $this->storeCachedResponse($cacheDir, $signature, $response);
+
+            return $response;
+        } finally {
+            $this->releaseLock($lockHandle);
+        }
+    }
+
+    /**
+     * Execute the HTTP request with retries/backoff and return the decoded payload.
+     *
+     * @return array<string, mixed>
+     */
+    private function dispatchRequest(string $encodedBody): array
+    {
         $status = null;
         $raw = null;
         $lastErrorMessage = null;
@@ -187,7 +226,7 @@ final class OpenAIClient
                 CURLOPT_HTTPHEADER     => [
                     'Content-Type: application/json',
                     'Authorization: Bearer ' . $this->apiKey,
-                    'User-Agent: RedClayRoadTrip/1.0 (+php; litespeed)',
+                    'User-Agent: ' . $this->userAgent(),
                 ],
                 CURLOPT_POSTFIELDS     => $encodedBody,
                 CURLOPT_CONNECTTIMEOUT => 10,
@@ -227,8 +266,7 @@ final class OpenAIClient
                 throw new \RuntimeException($lastErrorMessage ?? 'Failed to contact OpenAI.');
             }
 
-            // Exponential backoff: 1s, 2s
-            sleep(1 << ($attempt - 1));
+            $this->backoffWithJitter($attempt);
         }
 
         if ($raw === null) {
@@ -394,5 +432,203 @@ final class OpenAIClient
             return '';
         }
         return (string) $value;
+    }
+
+    private function userAgent(): string
+    {
+        return 'RedClayRoadTrip/1.1 (+php; litespeed)';
+    }
+
+    private function cacheDirectory(): string
+    {
+        $root = dirname(__DIR__, 2);
+        $dir = $root . '/data/cache/openai';
+
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+            throw new \RuntimeException('Unable to initialize OpenAI cache directory.');
+        }
+
+        return $dir;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function readCachedResponse(string $cacheDir, string $signature): ?array
+    {
+        $path = $cacheDir . '/' . $signature . '.json';
+
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $expiresAt = filemtime($path);
+        if ($expiresAt === false || ($expiresAt + self::CACHE_TTL_SECONDS) < time()) {
+            @unlink($path);
+            return null;
+        }
+
+        $contents = @file_get_contents($path);
+        if ($contents === false) {
+            return null;
+        }
+
+        try {
+            /** @var array<string, mixed> $decoded */
+            $decoded = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\Throwable $exception) {
+            Logger::logThrowable($exception, [
+                'client_method' => __METHOD__,
+                'stage' => 'decode_cache',
+            ]);
+            @unlink($path);
+            return null;
+        }
+
+        return $decoded;
+    }
+
+    /**
+     * @param array<string, mixed> $response
+     */
+    private function storeCachedResponse(string $cacheDir, string $signature, array $response): void
+    {
+        $path = $cacheDir . '/' . $signature . '.json';
+
+        try {
+            $payload = json_encode($response, JSON_THROW_ON_ERROR);
+        } catch (\Throwable $exception) {
+            Logger::logThrowable($exception, [
+                'client_method' => __METHOD__,
+                'stage' => 'encode_cache',
+            ]);
+            return;
+        }
+
+        @file_put_contents($path, $payload, LOCK_EX);
+        $this->pruneCache($cacheDir);
+    }
+
+    private function pruneCache(string $cacheDir): void
+    {
+        $files = glob($cacheDir . '/*.json');
+        if (!is_array($files)) {
+            return;
+        }
+
+        if (count($files) <= self::CACHE_MAX_ENTRIES) {
+            return;
+        }
+
+        usort($files, static function (string $a, string $b): int {
+            $ma = filemtime($a) ?: 0;
+            $mb = filemtime($b) ?: 0;
+            return $ma <=> $mb;
+        });
+
+        $excess = array_slice($files, 0, max(0, count($files) - self::CACHE_MAX_ENTRIES));
+        foreach ($excess as $file) {
+            @unlink($file);
+        }
+    }
+
+    /**
+     * @return resource|null
+     */
+    private function acquireLock(string $cacheDir, string $signature)
+    {
+        $lockPath = $cacheDir . '/' . $signature . '.lock';
+        $handle = @fopen($lockPath, 'c');
+        if ($handle === false) {
+            Logger::log('Failed to open cache lock', [
+                'client_method' => __METHOD__,
+                'path' => $lockPath,
+            ]);
+            return null;
+        }
+
+        if (!flock($handle, LOCK_EX)) {
+            fclose($handle);
+            Logger::log('Failed to acquire cache lock', [
+                'client_method' => __METHOD__,
+                'path' => $lockPath,
+            ]);
+            return null;
+        }
+
+        return $handle;
+    }
+
+    /**
+     * @param resource|null $handle
+     */
+    private function releaseLock($handle): void
+    {
+        if (!is_resource($handle)) {
+            return;
+        }
+
+        try {
+            flock($handle, LOCK_UN);
+        } finally {
+            fclose($handle);
+        }
+    }
+
+    private function enforceRateLimit(string $cacheDir): void
+    {
+        $lockPath = $cacheDir . '/rate-limit.lock';
+        $dataPath = $cacheDir . '/rate-limit.json';
+
+        $lockHandle = @fopen($lockPath, 'c');
+        if ($lockHandle === false) {
+            Logger::log('Unable to open rate limit lock', ['client_method' => __METHOD__]);
+            return;
+        }
+
+        if (!flock($lockHandle, LOCK_EX)) {
+            fclose($lockHandle);
+            Logger::log('Unable to lock rate limit file', ['client_method' => __METHOD__]);
+            return;
+        }
+
+        try {
+            $now = time();
+            $cutoff = $now - self::RATE_LIMIT_INTERVAL;
+
+            $timestamps = [];
+            if (is_file($dataPath)) {
+                $raw = @file_get_contents($dataPath);
+                if ($raw !== false && $raw !== '') {
+                    $decoded = json_decode($raw, true);
+                    if (is_array($decoded)) {
+                        $timestamps = array_filter($decoded, static function ($value) use ($cutoff) {
+                            return is_int($value) && $value >= $cutoff;
+                        });
+                    }
+                }
+            }
+
+            $timestamps = array_values($timestamps);
+
+            if (count($timestamps) >= self::RATE_LIMIT_MAX_REQUESTS) {
+                $retryAfter = max(1, ($timestamps[0] + self::RATE_LIMIT_INTERVAL) - $now);
+                throw new \RuntimeException('Rate limit exceeded. Please retry in ' . $retryAfter . ' seconds.');
+            }
+
+            $timestamps[] = $now;
+            @file_put_contents($dataPath, json_encode($timestamps));
+        } finally {
+            flock($lockHandle, LOCK_UN);
+            fclose($lockHandle);
+        }
+    }
+
+    private function backoffWithJitter(int $attempt): void
+    {
+        $baseDelaySeconds = 1 << ($attempt - 1); // 1, 2, 4, ...
+        $jitterMilliseconds = random_int(100, 750);
+        $sleepMicroseconds = ($baseDelaySeconds * 1_000 + $jitterMilliseconds) * 1_000;
+        usleep($sleepMicroseconds);
     }
 }
