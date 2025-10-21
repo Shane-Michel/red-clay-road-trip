@@ -96,19 +96,16 @@ async function geocodeLocation(query) {
   if (!trimmed) return null;
   if (geocodeCache.has(trimmed)) return geocodeCache.get(trimmed);
 
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(
-    trimmed
-  )}`;
+  const url = `api/geocode.php?q=${encodeURIComponent(trimmed)}`;
 
   try {
-    const response = await fetch(url, { headers: { 'Accept-Language': 'en' } });
-    if (!response.ok) throw new Error(`Geocoding failed (${response.status})`);
-    const data = await response.json();
-    const match = Array.isArray(data) && data.length ? data[0] : null;
-    const lat = match ? Number.parseFloat(match.lat) : null;
-    const lon = match ? Number.parseFloat(match.lon) : null;
+    const data = await fetchJSON(url);
+    const lat = Number.parseFloat(data?.lat);
+    const lon = Number.parseFloat(data?.lon);
+    const displayName =
+      (typeof data?.display_name === 'string' && data.display_name.trim()) ? data.display_name.trim() : trimmed;
     const valid = Number.isFinite(lat) && Number.isFinite(lon);
-    const coords = valid ? { lat, lon, name: match.display_name || trimmed } : null;
+    const coords = valid ? { lat, lon, name: displayName } : null;
     geocodeCache.set(trimmed, coords);
     return coords;
   } catch (e) {
