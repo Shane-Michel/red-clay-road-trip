@@ -204,6 +204,152 @@ async function updateMap(trip) {
 
 /* ----------------------------- Networking ------------------------------ */
 
+const AI_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const AI_CACHE_LIMIT = 24;
+const aiResponseCache = new Map();
+const aiPendingRequests = new Map();
+let aiCacheLastSweep = 0;
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function stableStringify(value) {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+}
+
+function cloneForCache(value) {
+  if (typeof structuredClone === 'function') {
+    try { return structuredClone(value); }
+    catch { /* ignore */ }
+  }
+  try { return JSON.parse(JSON.stringify(value)); }
+  catch { return value; }
+}
+
+function serializeFormData(formData) {
+  const payload = {};
+  if (!(formData instanceof FormData)) return payload;
+
+  formData.forEach((rawValue, key) => {
+    let value = rawValue;
+    if (typeof File !== 'undefined' && value instanceof File) {
+      value = { name: value.name, size: value.size, type: value.type };
+    } else if (typeof value === 'string') {
+      value = value.trim();
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      const existing = payload[key];
+      if (Array.isArray(existing)) existing.push(value);
+      else payload[key] = [existing, value];
+    } else {
+      payload[key] = value;
+    }
+  });
+
+  return payload;
+}
+
+function buildFormData(serialized) {
+  const formData = new FormData();
+  if (!serialized || typeof serialized !== 'object') return formData;
+
+  Object.entries(serialized).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value.forEach((entry) => {
+        const normalized = entry == null ? '' : String(entry);
+        formData.append(key, normalized);
+      });
+      return;
+    }
+
+    if (value && typeof value === 'object') {
+      formData.append(key, JSON.stringify(value));
+      return;
+    }
+
+    const normalized = value == null ? '' : String(value);
+    formData.append(key, normalized);
+  });
+
+  return formData;
+}
+
+function sweepAiCache() {
+  const now = Date.now();
+  if (now - aiCacheLastSweep < 30_000) return;
+  aiCacheLastSweep = now;
+
+  aiResponseCache.forEach((entry, key) => {
+    if (!entry || entry.expiresAt <= now) {
+      aiResponseCache.delete(key);
+    }
+  });
+
+  if (aiResponseCache.size <= AI_CACHE_LIMIT) return;
+
+  const entries = Array.from(aiResponseCache.entries())
+    .sort((a, b) => a[1].expiresAt - b[1].expiresAt);
+
+  while (entries.length > AI_CACHE_LIMIT) {
+    const [key] = entries.shift();
+    aiResponseCache.delete(key);
+  }
+}
+
+function getCachedItinerary(key) {
+  const entry = aiResponseCache.get(key);
+  if (!entry) return null;
+
+  if (entry.expiresAt <= Date.now()) {
+    aiResponseCache.delete(key);
+    return null;
+  }
+
+  return cloneForCache(entry.payload);
+}
+
+function setCachedItinerary(key, payload) {
+  aiResponseCache.set(key, {
+    payload: cloneForCache(payload),
+    expiresAt: Date.now() + AI_CACHE_TTL,
+  });
+  sweepAiCache();
+}
+
+async function requestItinerary(serializedPayload, { attempts = 3, baseDelayMs = 700 } = {}) {
+  const maxAttempts = Number.isInteger(attempts) && attempts > 0 ? attempts : 1;
+  const baseDelay = Number.isFinite(baseDelayMs) && baseDelayMs > 0 ? baseDelayMs : 500;
+
+  let attempt = 0;
+  let lastError = null;
+
+  while (attempt < maxAttempts) {
+    attempt += 1;
+    try {
+      const body = buildFormData(serializedPayload);
+      return await fetchJSON('api/generate_trip.php', { method: 'POST', body });
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error('Failed to contact the itinerary service.');
+      if (attempt >= maxAttempts) break;
+
+      const delayMs = baseDelay * (2 ** (attempt - 1));
+      const jitter = Math.floor(Math.random() * baseDelay);
+      await delay(delayMs + jitter);
+    }
+  }
+
+  throw lastError || new Error('Failed to contact the itinerary service.');
+}
+
 /* -------------------------- User scope management ----------------------- */
 
 const travelerScope = (() => {
@@ -999,6 +1145,9 @@ if (form) {
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const formData = new FormData(form);
+    const serialized = serializeFormData(formData);
+    const scopeKey = travelerScope.current() || 'public';
+    const cacheKey = stableStringify({ scope: scopeKey, payload: serialized });
 
     if (saveButton) saveButton.disabled = true;
     if (resultsSection) resultsSection.hidden = true;
@@ -1007,21 +1156,38 @@ if (form) {
     if (editorSection) editorSection.hidden = true;
     clearShareFeedback();
 
+    let addedPending = false;
+
     try {
-      const raw = await fetchJSON('api/generate_trip.php', { method: 'POST', body: formData });
+      let raw = getCachedItinerary(cacheKey);
+
+      if (!raw) {
+        let pending = aiPendingRequests.get(cacheKey);
+        if (!pending) {
+          pending = requestItinerary(serialized);
+          aiPendingRequests.set(cacheKey, pending);
+          addedPending = true;
+        }
+
+        raw = await pending;
+        setCachedItinerary(cacheKey, raw);
+      }
+
       renderItinerary(raw); // normalizes & sets state
-    } catch (e) {
-      if (itineraryContainer) {
-        itineraryContainer.innerHTML = `<p class="error">${e.message || 'Something went wrong while generating your trip.'}</p>`;
+      } catch (e) {
+        if (itineraryContainer) {
+          itineraryContainer.innerHTML = `<p class="error">${e.message || 'Something went wrong while generating your trip.'}</p>`;
+        }
+        if (resultsSection) resultsSection.hidden = false;
+        if (saveButton) {
+          saveButton.disabled = true;
+          delete saveButton.dataset.itineraryPayload;
+          delete saveButton.dataset.itineraryId;
+        }
+        resetMap('Map preview unavailable for this itinerary.');
+      } finally {
+        if (addedPending) aiPendingRequests.delete(cacheKey);
       }
-      if (resultsSection) resultsSection.hidden = false;
-      if (saveButton) {
-        saveButton.disabled = true;
-        delete saveButton.dataset.itineraryPayload;
-        delete saveButton.dataset.itineraryId;
-      }
-      resetMap('Map preview unavailable for this itinerary.');
-    }
   });
 }
 
