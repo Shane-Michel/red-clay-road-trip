@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "deploy": "./scripts/deploy.sh"
+    "deploy": "wsl rsync -avz --chmod=F644,D755 public src michelco@michelcollective.com:/home/michelco/redclayroadtrip.s-sites.com/"
   }
 }
