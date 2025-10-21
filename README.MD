@@ -68,7 +68,10 @@ The first request will automatically create the SQLite database at `data/trips.s
 
 ## Deployment
 
-- Run `npm run deploy` to sync the project files to the production server using the configured `rsync` command.
+- Run `./scripts/deploy.sh` to sync the project files to the production server using the configured `rsync` command.
+  - Set the `DEPLOY_TARGET` environment variable or pass `--target <user@host:/path>` to override the default destination.
+  - Add `--dry-run` to preview the files that will be transferred or `--delete` to remove remote files that no longer exist locally.
+- `npm run deploy` is provided for compatibility, but it requires a working Node.js installation. Running the shell script directly avoids the Node.js dependency for environments where `node` is unavailable.
 
 ## License
 
