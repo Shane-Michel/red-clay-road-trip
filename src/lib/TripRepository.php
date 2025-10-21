@@ -3,15 +3,29 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/Logger.php';
+require_once __DIR__ . '/UserScope.php';
 
 class TripRepository
 {
-    private const DB_PATH = __DIR__ . '/../../data/trips.sqlite';
+    private const BASE_DB_DIR = __DIR__ . '/../../data';
+    private const DEFAULT_DB_FILENAME = 'trips.sqlite';
 
-    public static function initialize(): void
+    /** @var array<string, \PDO> */
+    private static array $connections = [];
+
+    /** @var array<string, bool> */
+    private static array $initialized = [];
+
+    public static function initialize(?UserScope $scope = null): void
     {
+        $scope = $scope ?? UserScope::fromRequest();
+        $path = self::resolveDatabasePath($scope);
+        if (isset(self::$initialized[$path])) {
+            return;
+        }
+
         try {
-            $db = self::getConnection();
+            $db = self::getConnection($scope);
             $sql = <<<'SQL'
 CREATE TABLE IF NOT EXISTS trips (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,18 +39,23 @@ CREATE TABLE IF NOT EXISTS trips (
 SQL;
 
             $db->exec($sql);
+            self::$initialized[$path] = true;
         } catch (\Throwable $exception) {
-            Logger::logThrowable($exception, ['repository_method' => __METHOD__]);
+            Logger::logThrowable($exception, [
+                'repository_method' => __METHOD__,
+                'scope' => $scope->storageKey(),
+            ]);
             throw $exception;
         }
     }
 
-    public static function saveTrip(array $itinerary): int
+    public static function saveTrip(UserScope $scope, array $itinerary): int
     {
         $normalized = $itinerary;
         try {
             $normalized = self::prepareForPersistence($itinerary);
-            $db = self::getConnection();
+            self::initialize($scope);
+            $db = self::getConnection($scope);
             $sql = <<<'SQL'
 INSERT INTO trips (
     start_location,
@@ -71,6 +90,7 @@ SQL;
         } catch (\Throwable $exception) {
             Logger::logThrowable($exception, [
                 'repository_method' => __METHOD__,
+                'scope' => $scope->storageKey(),
                 'itinerary_context' => [
                     'start_location' => $normalized['start_location'] ?? null,
                     'departure_datetime' => $normalized['departure_datetime'] ?? null,
@@ -82,12 +102,13 @@ SQL;
         }
     }
 
-    public static function updateTrip(int $id, array $itinerary): bool
+    public static function updateTrip(UserScope $scope, int $id, array $itinerary): bool
     {
         $normalized = $itinerary;
         try {
             $normalized = self::prepareForPersistence($itinerary);
-            $db = self::getConnection();
+            self::initialize($scope);
+            $db = self::getConnection($scope);
             $sql = <<<'SQL'
 UPDATE trips
 SET
@@ -112,6 +133,7 @@ SQL;
         } catch (\Throwable $exception) {
             Logger::logThrowable($exception, [
                 'repository_method' => __METHOD__,
+                'scope' => $scope->storageKey(),
                 'trip_id' => $id,
                 'cities_of_interest' => $normalized['cities_of_interest'] ?? null,
             ]);
@@ -122,10 +144,11 @@ SQL;
     /**
      * @return array<int, array<string, mixed>>
      */
-    public static function listTrips(): array
+    public static function listTrips(UserScope $scope): array
     {
         try {
-            $db = self::getConnection();
+            self::initialize($scope);
+            $db = self::getConnection($scope);
             $sql = <<<'SQL'
 SELECT
     id,
@@ -170,15 +193,19 @@ SQL;
                 return $row;
             }, $rows ?: []);
         } catch (\Throwable $exception) {
-            Logger::logThrowable($exception, ['repository_method' => __METHOD__]);
+            Logger::logThrowable($exception, [
+                'repository_method' => __METHOD__,
+                'scope' => $scope->storageKey(),
+            ]);
             throw $exception;
         }
     }
 
-    public static function getTrip(int $id): ?array
+    public static function getTrip(UserScope $scope, int $id): ?array
     {
         try {
-            $db = self::getConnection();
+            self::initialize($scope);
+            $db = self::getConnection($scope);
             $stmt = $db->prepare('SELECT itinerary_json FROM trips WHERE id = :id');
             $stmt->execute([':id' => $id]);
             $data = $stmt->fetch(\PDO::FETCH_ASSOC);
@@ -195,52 +222,69 @@ SQL;
         } catch (\Throwable $exception) {
             Logger::logThrowable($exception, [
                 'repository_method' => __METHOD__,
+                'scope' => $scope->storageKey(),
                 'trip_id' => $id,
             ]);
             throw $exception;
         }
     }
 
-    public static function tripExists(int $id): bool
+    public static function tripExists(UserScope $scope, int $id): bool
     {
         try {
-            $db = self::getConnection();
+            self::initialize($scope);
+            $db = self::getConnection($scope);
             $stmt = $db->prepare('SELECT 1 FROM trips WHERE id = :id');
             $stmt->execute([':id' => $id]);
             return (bool) $stmt->fetchColumn();
         } catch (\Throwable $exception) {
             Logger::logThrowable($exception, [
                 'repository_method' => __METHOD__,
+                'scope' => $scope->storageKey(),
                 'trip_id' => $id,
             ]);
             throw $exception;
         }
     }
 
-    private static function getConnection(): \PDO
+    private static function getConnection(UserScope $scope): \PDO
     {
-        static $pdo = null;
-        if ($pdo instanceof \PDO) {
-            return $pdo;
+        $path = self::resolveDatabasePath($scope);
+        if (isset(self::$connections[$path]) && self::$connections[$path] instanceof \PDO) {
+            return self::$connections[$path];
         }
 
         try {
-            $dbDirectory = dirname(self::DB_PATH);
+            $dbDirectory = dirname($path);
             if (!is_dir($dbDirectory)) {
                 if (!mkdir($dbDirectory, 0775, true) && !is_dir($dbDirectory)) {
                     throw new \RuntimeException('Unable to create database directory: ' . $dbDirectory);
                 }
             }
 
-            $pdo = new \PDO('sqlite:' . self::DB_PATH);
+            $pdo = new \PDO('sqlite:' . $path);
             $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
             $pdo->setAttribute(\PDO::ATTR_DEFAULT_FETCH_MODE, \PDO::FETCH_ASSOC);
 
+            self::$connections[$path] = $pdo;
+
             return $pdo;
         } catch (\Throwable $exception) {
-            Logger::logThrowable($exception, ['repository_method' => __METHOD__]);
+            Logger::logThrowable($exception, [
+                'repository_method' => __METHOD__,
+                'scope' => $scope->storageKey(),
+            ]);
             throw $exception;
         }
+    }
+
+    private static function resolveDatabasePath(UserScope $scope): string
+    {
+        if ($scope->isDefault()) {
+            return self::BASE_DB_DIR . '/' . self::DEFAULT_DB_FILENAME;
+        }
+
+        return self::BASE_DB_DIR . '/users/' . $scope->storageKey() . '.sqlite';
     }
 
     private static function prepareForPersistence(array $itinerary): array

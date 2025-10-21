@@ -19,6 +19,12 @@ const addStopButton = document.getElementById('add-stop');
 const applyEditsButton = document.getElementById('apply-edits');
 const citiesContainer = document.getElementById('cities-of-interest');
 const addCityButton = document.getElementById('add-city');
+const accountStatus = document.getElementById('account-status');
+const accountKeyInput = document.getElementById('account-key');
+const accountApplyButton = document.getElementById('account-apply');
+const accountGenerateButton = document.getElementById('account-generate');
+const accountCopyButton = document.getElementById('account-copy');
+const accountResetButton = document.getElementById('account-reset');
 
 let mapInstance = null;
 let mapMarkers = [];
@@ -201,8 +207,126 @@ async function updateMap(trip) {
 
 /* ----------------------------- Networking ------------------------------ */
 
-async function fetchJSON(url, options) {
-  const response = await fetch(url, options);
+/* -------------------------- User scope management ----------------------- */
+
+const travelerScope = (() => {
+  const STORAGE_KEY = 'redclay.travelerKey';
+  let stored = '';
+  try {
+    stored = window.localStorage ? window.localStorage.getItem(STORAGE_KEY) : '';
+  } catch (error) {
+    console.warn('Unable to read traveler scope', error);
+  }
+  let current = sanitize(stored);
+  const listeners = new Set();
+
+  function sanitize(value) {
+    if (value == null) return '';
+    const trimmed = String(value).trim();
+    if (!trimmed) return '';
+    const withoutBreaks = trimmed.replace(/\s+/g, ' ');
+    const filtered = withoutBreaks.replace(/[^A-Za-z0-9@._-]/g, '');
+    return filtered.slice(0, 120);
+  }
+
+  function persist() {
+    try {
+      if (current) window.localStorage.setItem(STORAGE_KEY, current);
+      else window.localStorage.removeItem(STORAGE_KEY);
+    } catch (error) {
+      console.warn('Unable to persist traveler scope', error);
+    }
+  }
+
+  function notify() {
+    listeners.forEach((listener) => {
+      try {
+        listener(current);
+      } catch (error) {
+        console.error('travelerScope listener error', error);
+      }
+    });
+  }
+
+  function set(value) {
+    current = sanitize(value);
+    persist();
+    notify();
+    return current;
+  }
+
+  return {
+    current: () => current,
+    isDefault: () => current === '',
+    set,
+    clear: () => set(''),
+    generate: () => {
+      const base = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`;
+      const cleaned = base.replace(/[^a-z0-9]/gi, '').toLowerCase();
+      const padded = cleaned.padEnd(24, 'x');
+      return `rc${padded}`.slice(0, 40);
+    },
+    decorate: (options = {}) => {
+      const opts = { ...options };
+      const headers = new Headers(options && options.headers ? options.headers : undefined);
+      if (current) headers.set('X-User-Scope', current);
+      opts.headers = headers;
+      return opts;
+    },
+    onChange: (listener) => {
+      if (typeof listener !== 'function') return () => {};
+      listeners.add(listener);
+      listener(current);
+      return () => listeners.delete(listener);
+    },
+  };
+})();
+
+let accountAnnouncement = '';
+let accountAnnouncementTimeout = null;
+
+function updateAccountStatus(key) {
+  if (!accountStatus) return;
+
+  let base;
+  if (!key) {
+    base = `<span>${escapeHtml('Currently using the shared demo space. Saved trips here are visible to other visitors.')}</span>`;
+    if (accountKeyInput) accountKeyInput.value = '';
+    if (accountCopyButton) accountCopyButton.hidden = true;
+    if (accountResetButton) accountResetButton.disabled = true;
+  } else {
+    const masked = key.length > 12 ? `${key.slice(0, 6)}…${key.slice(-4)}` : key;
+    base = `<span>Private key active (<code>${escapeHtml(masked)}</code>). Trips saved now are isolated to this key.</span>`;
+    if (accountKeyInput) accountKeyInput.value = key;
+    if (accountCopyButton) accountCopyButton.hidden = false;
+    if (accountResetButton) accountResetButton.disabled = false;
+  }
+
+  const message = accountAnnouncement
+    ? `<span class="account__announcement">${escapeHtml(accountAnnouncement)}</span>`
+    : '';
+  accountStatus.innerHTML = `${base}${message}`;
+}
+
+function announceAccount(message) {
+  accountAnnouncement = message || '';
+  if (accountAnnouncementTimeout) {
+    clearTimeout(accountAnnouncementTimeout);
+    accountAnnouncementTimeout = null;
+  }
+  if (accountAnnouncement) {
+    accountAnnouncementTimeout = setTimeout(() => {
+      accountAnnouncement = '';
+      updateAccountStatus(travelerScope.current());
+    }, 5000);
+  }
+  updateAccountStatus(travelerScope.current());
+}
+
+async function fetchJSON(url, options = {}) {
+  const response = await fetch(url, travelerScope.decorate(options));
   const contentType = response.headers.get('content-type') || '';
 
   let parsed = null;
@@ -683,10 +807,14 @@ function renderItinerary(itinerary) {
 /* ------------------------------- History -------------------------------- */
 
 function renderHistory(trips) {
+  if (!historyList) return;
   historyList.innerHTML = '';
 
   if (!Array.isArray(trips) || trips.length === 0) {
-    historyList.innerHTML = '<p>No trips saved yet. Generate one to get started!</p>';
+    const message = travelerScope.isDefault()
+      ? 'No trips saved yet. Generate one to get started!'
+      : 'No trips saved for this key yet. Save a trip to see it here.';
+    historyList.innerHTML = `<p>${escapeHtml(message)}</p>`;
     return;
   }
 
@@ -712,11 +840,111 @@ async function loadHistory() {
     renderHistory(trips);
   } catch (e) {
     console.error(e);
-    historyList.innerHTML = '<p>Unable to load saved trips. Please try again later.</p>';
+    if (historyList) {
+      const message = travelerScope.isDefault()
+        ? 'Unable to load saved trips. Please try again later.'
+        : 'Unable to load trips for this key. Please try again later.';
+      historyList.innerHTML = `<p>${escapeHtml(message)}</p>`;
+    }
   }
 }
 
 /* ----------------------------- Event wiring ---------------------------- */
+
+let scopeInitialized = false;
+travelerScope.onChange((key) => {
+  updateAccountStatus(key);
+  if (scopeInitialized) {
+    loadHistory();
+  } else {
+    scopeInitialized = true;
+  }
+});
+
+if (accountGenerateButton) {
+  accountGenerateButton.addEventListener('click', async () => {
+    const newKey = travelerScope.generate();
+    const applied = travelerScope.set(newKey);
+    if (accountKeyInput) {
+      accountKeyInput.focus();
+      accountKeyInput.select();
+    }
+
+    if (
+      applied
+      && typeof navigator !== 'undefined'
+      && navigator.clipboard
+      && typeof navigator.clipboard.writeText === 'function'
+    ) {
+      try {
+        await navigator.clipboard.writeText(applied);
+        announceAccount('Generated a new private key and copied it to your clipboard.');
+        return;
+      } catch (error) {
+        console.warn('Unable to copy private key automatically', error);
+      }
+    }
+
+    announceAccount('Generated a new private key. Copy it somewhere safe.');
+  });
+}
+
+if (accountApplyButton) {
+  accountApplyButton.addEventListener('click', () => {
+    const value = accountKeyInput ? accountKeyInput.value : '';
+    const applied = travelerScope.set(value);
+    if (!applied) announceAccount('Using the shared demo space.');
+    else announceAccount('Private key applied. History will refresh.');
+  });
+}
+
+if (accountResetButton) {
+  accountResetButton.addEventListener('click', () => {
+    if (travelerScope.isDefault()) {
+      announceAccount('Already using the shared demo space.');
+      return;
+    }
+    travelerScope.clear();
+    if (accountKeyInput) accountKeyInput.value = '';
+    announceAccount('Switched back to the shared demo space.');
+  });
+}
+
+if (accountCopyButton) {
+  accountCopyButton.addEventListener('click', async () => {
+    const key = travelerScope.current();
+    if (!key) {
+      announceAccount('No private key to copy yet.');
+      return;
+    }
+
+    if (
+      typeof navigator === 'undefined'
+      || !navigator.clipboard
+      || typeof navigator.clipboard.writeText !== 'function'
+    ) {
+      announceAccount('Clipboard access unavailable. Select the key and copy it manually.');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(key);
+      announceAccount('Private key copied to clipboard.');
+    } catch (error) {
+      console.warn('Clipboard write failed', error);
+      announceAccount('Unable to copy automatically. Select and copy the key manually.');
+    }
+  });
+}
+
+if (accountKeyInput) {
+  accountKeyInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      if (accountApplyButton) accountApplyButton.click();
+    }
+  });
+}
 
 if (citiesContainer) {
   const wrappers = Array.from(citiesContainer.querySelectorAll('.field__repeatable'));

@@ -5,14 +5,21 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/src/bootstrap.php';
 require_once dirname(__DIR__) . '/src/lib/TripRepository.php';
 require_once dirname(__DIR__) . '/src/lib/ShareToken.php';
+require_once dirname(__DIR__) . '/src/lib/UserScope.php';
 
-TripRepository::initialize();
+$scopeParam = isset($_GET['scope']) ? (string) $_GET['scope'] : '';
+$scope = $scopeParam !== '' ? UserScope::fromStorageKey($scopeParam) : UserScope::default();
+$scope->persist();
+TripRepository::initialize($scope);
 
 $tripId = isset($_GET['trip']) ? (int) $_GET['trip'] : 0;
 $expires = isset($_GET['expires']) ? (int) $_GET['expires'] : 0;
 $signature = isset($_GET['sig']) ? (string) $_GET['sig'] : '';
 
-$valid = $tripId > 0 && $expires > 0 && $signature !== '' && ShareToken::validate($tripId, $expires, $signature);
+$valid = $tripId > 0
+    && $expires > 0
+    && $signature !== ''
+    && ShareToken::validate($tripId, $expires, $signature, $scope->storageKey());
 
 if (!$valid) {
     http_response_code(403);
@@ -20,7 +27,7 @@ if (!$valid) {
     exit;
 }
 
-$trip = TripRepository::getTrip($tripId);
+$trip = TripRepository::getTrip($scope, $tripId);
 if (!$trip) {
     http_response_code(404);
     echo '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Trip not found</title><link rel="stylesheet" href="assets/css/style.css"></head><body><main class="container"><section class="results"><h1>Trip not found</h1><p>The requested trip no longer exists.</p></section></main></body></html>';

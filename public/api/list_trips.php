@@ -4,16 +4,22 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 2) . '/src/bootstrap.php';
 require_once dirname(__DIR__, 2) . '/src/lib/TripRepository.php';
+require_once dirname(__DIR__, 2) . '/src/lib/UserScope.php';
 
 header('Content-Type: application/json');
 
-TripRepository::initialize();
+$scope = UserScope::fromRequest();
+$scope->persist();
+TripRepository::initialize($scope);
 
 try {
-    $trips = TripRepository::listTrips();
+    $trips = TripRepository::listTrips($scope);
     echo json_encode($trips, JSON_PRETTY_PRINT);
 } catch (\Throwable $exception) {
-    Logger::logThrowable($exception, ['endpoint' => 'list_trips']);
+    Logger::logThrowable($exception, [
+        'endpoint' => 'list_trips',
+        'scope' => $scope->storageKey(),
+    ]);
     http_response_code(500);
     echo json_encode(['error' => $exception->getMessage()]);
 }

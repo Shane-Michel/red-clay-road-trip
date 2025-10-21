@@ -27,6 +27,102 @@ body {
     padding: 3rem 0;
 }
 
+.account {
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 16px;
+    padding: 1.75rem 2rem;
+    box-shadow: var(--shadow);
+    margin-top: -3.5rem;
+    margin-bottom: 2.5rem;
+    position: relative;
+    z-index: 3;
+}
+
+.account__header h2 {
+    margin: 0 0 0.25rem;
+    font-size: 1.5rem;
+}
+
+.account__header p {
+    margin: 0;
+    color: var(--muted);
+}
+
+.account__status {
+    margin-top: 1rem;
+    font-weight: 600;
+}
+
+.account__controls {
+    margin-top: 1.25rem;
+    display: grid;
+    gap: 1rem;
+}
+
+.account__row {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.account__label {
+    font-weight: 600;
+}
+
+.account__input-group {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.account__input-group input {
+    flex: 1 1 220px;
+    padding: 0.85rem 1rem;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    font-size: 1rem;
+}
+
+.account__input-group input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(195, 86, 45, 0.15);
+}
+
+.account__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.account__hint {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--muted);
+}
+
+.account__announcement {
+    display: block;
+    margin-top: 0.5rem;
+    color: var(--accent-dark);
+    font-weight: 600;
+}
+
+@media (max-width: 768px) {
+    .account {
+        margin-top: -2.5rem;
+        padding: 1.5rem;
+    }
+
+    .account__input-group {
+        flex-direction: column;
+    }
+
+    .account__actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
 .hero {
     position: relative;
     background: url('https://images.unsplash.com/photo-1542737574-4b7052ef05b4?auto=format&fit=crop&w=1600&q=80') center/cover no-repeat;

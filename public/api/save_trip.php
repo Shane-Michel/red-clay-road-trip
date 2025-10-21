@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 2) . '/src/bootstrap.php';
 require_once dirname(__DIR__, 2) . '/src/lib/TripRepository.php';
+require_once dirname(__DIR__, 2) . '/src/lib/UserScope.php';
 
 header('Content-Type: application/json');
 
-TripRepository::initialize();
+$scope = UserScope::fromRequest();
+$scope->persist();
+TripRepository::initialize($scope);
 
 function respond(int $status, array $data): void
 {
@@ -62,21 +65,22 @@ if (empty($input['city_of_interest'])) {
 try {
     $tripId = isset($input['id']) ? (int) $input['id'] : 0;
     if ($tripId > 0) {
-        if (!TripRepository::tripExists($tripId)) {
+        if (!TripRepository::tripExists($scope, $tripId)) {
             respond(404, ['error' => 'Trip not found']);
         }
 
         $input['id'] = $tripId;
-        TripRepository::updateTrip($tripId, $input);
+        TripRepository::updateTrip($scope, $tripId, $input);
         respond(200, ['id' => $tripId, 'updated' => true]);
     }
 
-    $id = TripRepository::saveTrip($input);
+    $id = TripRepository::saveTrip($scope, $input);
     respond(201, ['id' => $id]);
 } catch (\Throwable $exception) {
     Logger::logThrowable($exception, [
         'endpoint' => 'save_trip',
         'payload' => $input,
+        'scope' => $scope->storageKey(),
     ]);
 
     respond(500, ['error' => $exception->getMessage()]);

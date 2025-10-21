@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once dirname(__DIR__, 2) . '/src/bootstrap.php';
 require_once dirname(__DIR__, 2) . '/src/lib/TripRepository.php';
 require_once dirname(__DIR__, 2) . '/src/lib/ShareToken.php';
+require_once dirname(__DIR__, 2) . '/src/lib/UserScope.php';
 
 header('Content-Type: application/json');
 
@@ -14,7 +15,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-TripRepository::initialize();
+$scope = UserScope::fromRequest();
+$scope->persist();
+TripRepository::initialize($scope);
 
 $raw = file_get_contents('php://input');
 
@@ -37,7 +40,7 @@ if ($tripId <= 0) {
     exit;
 }
 
-if (!TripRepository::tripExists($tripId)) {
+if (!TripRepository::tripExists($scope, $tripId)) {
     http_response_code(404);
     echo json_encode(['error' => 'Trip not found']);
     exit;
@@ -52,18 +55,20 @@ if (isset($input['expires_in'])) {
 }
 
 try {
-    $token = ShareToken::create($tripId, $ttl);
+    $token = ShareToken::create($tripId, $ttl, $scope);
     $url = ShareToken::buildRelativeUrl($token);
 
     echo json_encode([
         'share_url' => $url,
         'expires' => $token['expires'],
         'expires_at' => (new \DateTimeImmutable('@' . $token['expires']))->setTimezone(new \DateTimeZone('UTC'))->format(\DateTimeInterface::ATOM),
+        'scope' => $token['scope'],
     ]);
 } catch (\Throwable $exception) {
     Logger::logThrowable($exception, [
         'endpoint' => 'create_share_link',
         'trip_id' => $tripId,
+        'scope' => $scope->storageKey(),
     ]);
     http_response_code(500);
     echo json_encode(['error' => 'Unable to create share link']);
