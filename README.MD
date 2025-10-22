@@ -8,7 +8,7 @@ Red Clay Road Trip is a single-page web experience that builds an AI-assisted ad
 - **Rich client experience** with a responsive layout, dark-mode support, and dynamic rendering.
 - **Trip history** stored locally in SQLite so returning visitors can revisit or reload previous adventures.
 - **Beyond history**: every stop now includes fun facts, can't-miss highlights, and hidden bites in addition to contextual stories.
-- **Live place insights** using OpenTripMap and Wikipedia, with optional Yelp ratings and OpenWeather snapshots when API keys are available.
+- **Live place insights** using OpenTripMap and Wikipedia, with optional OpenWeather snapshots when API keys are available.
 
 ## Getting started
 
@@ -56,7 +56,7 @@ The first request will automatically create the SQLite database at `data/trips.s
   - Returns the full itinerary for a saved trip.
 - `POST /api/live_lookup.php`
   - Accepts a JSON payload containing a stop `query` plus optional `address`, `city`, `latitude`, and `longitude`.
-  - Returns live place details from OpenTripMap and Wikipedia, plus Yelp and OpenWeather data when the relevant API keys are configured.
+  - Returns live place details from OpenTripMap and Wikipedia, plus OpenWeather data when the relevant API key is configured.
 
 ## Environment variables
 
@@ -65,7 +65,6 @@ The first request will automatically create the SQLite database at `data/trips.s
 | `OPENAI_API_KEY` | Required. Used to authenticate with OpenAI. |
 | `OPENAI_MODEL` | Optional. Overrides the default `gpt-4.1-nano` model used for itinerary generation. |
 | `OPENTRIPMAP_API_KEY` | Required for live lookups that enrich stops with OpenTripMap data. |
-| `YELP_API_KEY` | Optional. Adds Yelp business ratings, prices, and phone numbers when available. |
 | `OPENWEATHER_API_KEY` | Optional. Fetches current weather snapshots for each stop. |
 
 ## Development notes
