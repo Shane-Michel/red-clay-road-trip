@@ -512,6 +512,51 @@ body {
     font-size: 0.9rem;
 }
 
+.itinerary-stop__live {
+    margin-top: 1rem;
+    padding: 0.85rem 1rem;
+    border: 1px solid rgba(195, 86, 45, 0.2);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.85);
+}
+
+.itinerary-stop__live-title {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+}
+
+.itinerary-stop__live-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 0.4rem;
+}
+
+.itinerary-stop__live-list li {
+    font-size: 0.95rem;
+}
+
+.itinerary-stop__live-list a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.itinerary-stop__live-list a:hover,
+.itinerary-stop__live-list a:focus {
+    text-decoration: underline;
+}
+
+.itinerary-stop__live-status {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--muted);
+}
+
+.itinerary-stop__live-status--error {
+    color: var(--accent-dark);
+}
+
 .history {
     margin-top: 4rem;
 }
