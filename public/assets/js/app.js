@@ -26,6 +26,9 @@ const accountApplyButton = document.getElementById('account-apply');
 const accountGenerateButton = document.getElementById('account-generate');
 const accountCopyButton = document.getElementById('account-copy');
 const accountResetButton = document.getElementById('account-reset');
+const startLocationInput = document.getElementById('start_location');
+const useCurrentLocationButton = document.getElementById('use-current-location');
+const startLocationStatus = document.getElementById('start-location-status');
 
 let mapInstance = null;
 let mapMarkers = [];
@@ -33,6 +36,10 @@ let routeLayer = null;
 const geocodeCache = new Map();
 let currentTrip = null;
 let editorPendingChanges = false;
+const useCurrentLocationDefaultLabel = useCurrentLocationButton
+  ? (useCurrentLocationButton.textContent || '').trim() || 'Use My Location'
+  : 'Use My Location';
+let startLocationStatusTimeout = null;
 
 const generationAdRotation = [
   {
@@ -594,6 +601,72 @@ async function fetchJSON(url, options = {}) {
 }
 
 /* ------------------------------- Helpers ------------------------------- */
+
+function clearStartLocationStatusTimer() {
+  if (startLocationStatusTimeout) {
+    clearTimeout(startLocationStatusTimeout);
+    startLocationStatusTimeout = null;
+  }
+}
+
+function setStartLocationStatus(message, { error = false, autoHide = false } = {}) {
+  if (!startLocationStatus) return;
+  clearStartLocationStatusTimer();
+
+  if (!message) {
+    startLocationStatus.textContent = '';
+    startLocationStatus.hidden = true;
+    startLocationStatus.classList.remove('field__status--error');
+    return;
+  }
+
+  startLocationStatus.textContent = message;
+  startLocationStatus.hidden = false;
+  if (error) startLocationStatus.classList.add('field__status--error');
+  else startLocationStatus.classList.remove('field__status--error');
+
+  if (autoHide && !error) {
+    startLocationStatusTimeout = setTimeout(() => {
+      setStartLocationStatus('');
+    }, 6000);
+  }
+}
+
+function setCurrentLocationLoading(isLoading) {
+  if (!useCurrentLocationButton) return;
+  useCurrentLocationButton.disabled = Boolean(isLoading);
+  useCurrentLocationButton.textContent = isLoading ? 'Locating…' : useCurrentLocationDefaultLabel;
+}
+
+function geolocationSupported() {
+  return typeof navigator !== 'undefined' && !!navigator.geolocation;
+}
+
+function requestCurrentPosition(options = {}) {
+  return new Promise((resolve, reject) => {
+    if (!geolocationSupported()) {
+      reject(new Error('Geolocation is not supported in this environment.'));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+  });
+}
+
+async function reverseGeocodeCoordinates(latitude, longitude) {
+  try {
+    const data = await fetchJSON(
+      `api/reverse_geocode.php?lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}`
+    );
+    if (data && typeof data.display_name === 'string') {
+      const trimmed = data.display_name.trim();
+      if (trimmed) return trimmed;
+    }
+  } catch (error) {
+    console.warn('Reverse geocoding failed', error);
+  }
+  return '';
+}
 
 function normalizeItinerary(x) {
   const obj = (x && typeof x === 'object') ? x : {};
@@ -1188,6 +1261,79 @@ if (accountKeyInput) {
     if (event.key === 'Enter') {
       event.preventDefault();
       if (accountApplyButton) accountApplyButton.click();
+    }
+  });
+}
+
+if (startLocationInput) {
+  startLocationInput.addEventListener('input', () => {
+    setStartLocationStatus('');
+  });
+}
+
+if (useCurrentLocationButton) {
+  if (!geolocationSupported()) {
+    useCurrentLocationButton.disabled = true;
+    useCurrentLocationButton.title = 'Geolocation not supported in this browser.';
+  }
+
+  useCurrentLocationButton.addEventListener('click', async () => {
+    if (!geolocationSupported()) {
+      setStartLocationStatus(
+        'Location services are unavailable in this browser. Please enter your starting point manually.',
+        { error: true }
+      );
+      return;
+    }
+
+    setCurrentLocationLoading(true);
+    setStartLocationStatus('Locating you...');
+
+    try {
+      const position = await requestCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 120000,
+      });
+
+      const coords = position && position.coords ? position.coords : null;
+      const latitude = coords ? Number(coords.latitude) : Number.NaN;
+      const longitude = coords ? Number(coords.longitude) : Number.NaN;
+
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        throw new Error('Unable to determine your location. Please enter it manually.');
+      }
+
+      let label = await reverseGeocodeCoordinates(latitude, longitude);
+      const usingFallback = !label;
+      if (usingFallback) {
+        label = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+      }
+
+      if (startLocationInput) {
+        startLocationInput.value = label;
+        startLocationInput.dispatchEvent(new Event('input', { bubbles: true }));
+        startLocationInput.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      setStartLocationStatus(
+        usingFallback
+          ? 'Using GPS coordinates—feel free to refine them if needed.'
+          : 'Start location updated from your current position.',
+        { autoHide: true }
+      );
+    } catch (error) {
+      let message = 'Unable to access your location. Please enter your starting point manually.';
+      if (error && typeof error === 'object' && 'code' in error) {
+        if (error.code === 1) message = 'Location permission denied. Enter your starting point manually.';
+        else if (error.code === 2) message = 'Unable to determine your location. Try again or type it in manually.';
+        else if (error.code === 3) message = 'Location request timed out. Try again or enter your starting point manually.';
+      } else if (error instanceof Error && error.message) {
+        message = error.message;
+      }
+      setStartLocationStatus(message, { error: true });
+    } finally {
+      setCurrentLocationLoading(false);
     }
   });
 }

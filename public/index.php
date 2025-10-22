@@ -61,7 +61,11 @@ TripRepository::initialize($scope);
             <form id="trip-form" class="planner__form" autocomplete="off">
                 <div class="field">
                     <label for="start_location">Start Location</label>
-                    <input type="text" id="start_location" name="start_location" placeholder="e.g., 123 Main St, Atlanta, GA" required />
+                    <div class="field__input-row">
+                        <input type="text" id="start_location" name="start_location" placeholder="e.g., 123 Main St, Atlanta, GA" aria-describedby="start-location-status" required />
+                        <button type="button" id="use-current-location" class="btn btn--ghost field__inline-btn">Use My Location</button>
+                    </div>
+                    <p id="start-location-status" class="field__status" aria-live="polite" hidden></p>
                 </div>
                 <div class="field">
                     <label for="departure_datetime">Departure Date &amp; Time</label>
