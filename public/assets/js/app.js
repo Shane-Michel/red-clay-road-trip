@@ -13,6 +13,7 @@ const historyTemplate = document.getElementById('history-item-template');
 const mapElement = document.getElementById('map');
 const mapMessage = document.getElementById('map-message');
 const shareFeedback = document.getElementById('share-feedback');
+const generationStatus = document.getElementById('generation-status');
 const editorSection = document.getElementById('itinerary-editor');
 const editorStops = document.getElementById('editor-stops');
 const addStopButton = document.getElementById('add-stop');
@@ -32,6 +33,41 @@ let routeLayer = null;
 const geocodeCache = new Map();
 let currentTrip = null;
 let editorPendingChanges = false;
+
+const generationAdRotation = [
+  {
+    headline: 'Need a website without the headaches?',
+    body: 'I’ll design, build, host, and maintain it—all for $50/month. Your domain, your brand, done for you.',
+    linkText: 'Start today',
+    url: 'https://developer.shanemichel.net/services/hands-free',
+  },
+  {
+    headline: 'Stop fighting DIY website builders.',
+    body: 'Get a pro site, hosting, updates, and support—hands-free for $50/month.',
+    linkText: 'Launch now',
+    url: 'https://developer.shanemichel.net/services/hands-free',
+  },
+  {
+    headline: 'Website, hosting, updates—done for you.',
+    body: '$50/month covers it all so you can focus on the adventure.',
+    linkText: 'See what’s included',
+    url: 'https://developer.shanemichel.net/services/hands-free',
+  },
+  {
+    headline: 'Design + dev + hosting + care plan in one simple subscription.',
+    body: '$50/month and you never touch a line of code.',
+    linkText: 'Discover the plan',
+    url: 'https://developer.shanemichel.net/services/hands-free',
+  },
+  {
+    headline: 'Overwhelmed by websites? I handle everything—domain, design, hosting, updates—so you don’t have to.',
+    body: '$50/month keeps your site fresh while you stay road-trip ready.',
+    linkText: 'Get full-service help',
+    url: 'https://developer.shanemichel.net/services/hands-free',
+  },
+];
+
+let generationAdIndex = 0;
 
 /* ----------------------------- Map helpers ----------------------------- */
 
@@ -89,6 +125,73 @@ function showShareFeedback(message, { html = false, error = false } = {}) {
   else shareFeedback.textContent = message;
   if (error) shareFeedback.classList.add('results__share--error');
   else shareFeedback.classList.remove('results__share--error');
+}
+
+function nextGenerationAd() {
+  if (!generationAdRotation.length) {
+    return {
+      headline: 'Crafting your itinerary…',
+      body: 'Our AI travel host is piecing everything together.',
+      linkText: 'Explore more travel inspiration',
+      url: 'https://developer.shanemichel.net/services/hands-free',
+    };
+  }
+
+  const ad = generationAdRotation[generationAdIndex % generationAdRotation.length];
+  generationAdIndex = (generationAdIndex + 1) % generationAdRotation.length;
+  return ad;
+}
+
+function withHttps(url) {
+  const value = String(url || '').trim();
+  if (!value) return 'https://developer.shanemichel.net/services/hands-free';
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+function showGenerationAd() {
+  if (!generationStatus) return;
+  const ad = nextGenerationAd();
+  const href = withHttps(ad.url);
+  const lead = 'Our AI travel host is crafting your story-filled road trip. Sit tight while we map the magic!';
+  const linkLabel = ad.linkText || ad.url.replace(/^https?:\/\//i, '');
+  const bodyHtml = ad.body ? `<p class="generation-status__body">${escapeHtml(ad.body)}</p>` : '';
+
+  generationStatus.innerHTML = `
+    <div class="generation-status__spinner" aria-hidden="true"></div>
+    <div class="generation-status__content">
+      <p class="generation-status__lead">${escapeHtml(lead)}</p>
+      <div class="generation-status__ad">
+        <p class="generation-status__headline">${escapeHtml(ad.headline)}</p>
+        ${bodyHtml}
+        <p class="generation-status__link"><a href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(linkLabel)}</a></p>
+      </div>
+    </div>
+  `;
+  generationStatus.hidden = false;
+  generationStatus.classList.remove('generation-status--error');
+}
+
+function hideGenerationStatus() {
+  if (!generationStatus) return;
+  generationStatus.hidden = true;
+  generationStatus.classList.remove('generation-status--error');
+  generationStatus.innerHTML = '';
+}
+
+function showGenerationError(message) {
+  if (!generationStatus) return;
+  const safeMessage = message ? escapeHtml(message) : 'We hit a snag while generating your road trip.';
+  const suggestion = 'Please try again or adjust your cities and preferences.';
+
+  generationStatus.innerHTML = `
+    <div class="generation-status__spinner generation-status__spinner--paused" aria-hidden="true"></div>
+    <div class="generation-status__content">
+      <p class="generation-status__lead">${safeMessage}</p>
+      <p class="generation-status__body">${escapeHtml(suggestion)}</p>
+    </div>
+  `;
+  generationStatus.hidden = false;
+  generationStatus.classList.add('generation-status--error');
 }
 
 async function geocodeLocation(query) {
@@ -1155,8 +1258,10 @@ if (form) {
     resetMap('Generating map preview...');
     if (editorSection) editorSection.hidden = true;
     clearShareFeedback();
+    showGenerationAd();
 
     let addedPending = false;
+    let generationHadError = false;
 
     try {
       let raw = getCachedItinerary(cacheKey);
@@ -1174,20 +1279,23 @@ if (form) {
       }
 
       renderItinerary(raw); // normalizes & sets state
-      } catch (e) {
-        if (itineraryContainer) {
-          itineraryContainer.innerHTML = `<p class="error">${e.message || 'Something went wrong while generating your trip.'}</p>`;
-        }
-        if (resultsSection) resultsSection.hidden = false;
-        if (saveButton) {
-          saveButton.disabled = true;
-          delete saveButton.dataset.itineraryPayload;
-          delete saveButton.dataset.itineraryId;
-        }
-        resetMap('Map preview unavailable for this itinerary.');
-      } finally {
-        if (addedPending) aiPendingRequests.delete(cacheKey);
+    } catch (e) {
+      generationHadError = true;
+      if (itineraryContainer) {
+        itineraryContainer.innerHTML = `<p class="error">${e.message || 'Something went wrong while generating your trip.'}</p>`;
       }
+      if (resultsSection) resultsSection.hidden = false;
+      if (saveButton) {
+        saveButton.disabled = true;
+        delete saveButton.dataset.itineraryPayload;
+        delete saveButton.dataset.itineraryId;
+      }
+      resetMap('Map preview unavailable for this itinerary.');
+      showGenerationError(e.message);
+    } finally {
+      if (!generationHadError) hideGenerationStatus();
+      if (addedPending) aiPendingRequests.delete(cacheKey);
+    }
   });
 }
 
