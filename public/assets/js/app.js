@@ -34,6 +34,7 @@ let mapInstance = null;
 let mapMarkers = [];
 let routeLayer = null;
 const geocodeCache = new Map();
+const liveLookupCache = new Map();
 let currentTrip = null;
 let editorPendingChanges = false;
 const useCurrentLocationDefaultLabel = useCurrentLocationButton
@@ -155,6 +156,12 @@ function withHttps(url) {
   return /^https?:\/\//i.test(value) ? value : `https://${value}`;
 }
 
+function normalizeExternalUrl(url) {
+  const value = String(url ?? '').trim();
+  if (!value) return '';
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
 function showGenerationAd() {
   if (!generationStatus) return;
   const ad = nextGenerationAd();
@@ -267,13 +274,17 @@ async function updateMap(trip) {
     : safeTrip.city_of_interest;
 
   if (safeTrip.start_location) {
-    points.push({ label: 'Start', description: safeTrip.start_location });
+    points.push({ label: 'Start', description: safeTrip.start_location, coords: null });
   }
 
   stops.forEach((stop, index) => {
     const stopLabel = `Stop ${index + 1}: ${stop?.title || stop?.address || 'Scheduled stop'}`;
     const lookup = stop?.address || stop?.title || cityFallback || '';
-    points.push({ label: stopLabel, description: lookup });
+    const liveCoords = stop?.live_details?.coordinates;
+    const coords = liveCoords && Number.isFinite(liveCoords.lat) && Number.isFinite(liveCoords.lon)
+      ? { lat: liveCoords.lat, lon: liveCoords.lon }
+      : null;
+    points.push({ label: stopLabel, description: lookup, coords });
   });
 
   if (!points.length) {
@@ -283,8 +294,14 @@ async function updateMap(trip) {
 
   const resolved = [];
   for (const p of points) {
+    if (p.coords && Number.isFinite(p.coords.lat) && Number.isFinite(p.coords.lon)) {
+      resolved.push({ ...p, coords: p.coords });
+      continue;
+    }
+    const target = (p.description && p.description.trim()) ? p.description : p.label;
+    if (!target) continue;
     // sequential geocoding to avoid Nominatim rate limits
-    const coords = await geocodeLocation(p.description); // eslint-disable-line no-await-in-loop
+    const coords = await geocodeLocation(target); // eslint-disable-line no-await-in-loop
     if (coords) resolved.push({ ...p, coords });
   }
 
@@ -668,6 +685,70 @@ async function reverseGeocodeCoordinates(latitude, longitude) {
   return '';
 }
 
+function normalizeLiveSources(sources) {
+  if (!sources || typeof sources !== 'object') return {};
+  const normalized = {};
+  Object.entries(sources).forEach(([key, value]) => {
+    if (!value || typeof value !== 'object') return;
+    const entry = {};
+    Object.entries(value).forEach(([field, fieldValue]) => {
+      if (typeof fieldValue === 'string') entry[field] = fieldValue;
+      else if (typeof fieldValue === 'number') entry[field] = fieldValue;
+    });
+    if (Object.keys(entry).length) normalized[key] = entry;
+  });
+  return normalized;
+}
+
+function normalizeLiveWeather(weather) {
+  if (!weather || typeof weather !== 'object') return null;
+  const temperature = Number.parseFloat(weather.temperature);
+  const feelsLike = Number.parseFloat(weather.feels_like);
+  return {
+    temperature: Number.isFinite(temperature) ? temperature : null,
+    feels_like: Number.isFinite(feelsLike) ? feelsLike : null,
+    conditions: String(weather.conditions ?? ''),
+    updated_at: weather.updated_at ? new Date(weather.updated_at).toISOString() : '',
+    source_url: String(weather.source_url ?? ''),
+  };
+}
+
+function normalizeLiveDetails(details) {
+  if (!details || typeof details !== 'object') return null;
+
+  const contact = {
+    address: String(details?.contact?.address ?? ''),
+    hours: String(details?.contact?.hours ?? ''),
+    phone: String(details?.contact?.phone ?? ''),
+    website: String(details?.contact?.website ?? ''),
+  };
+
+  let coordinates = null;
+  if (details.coordinates && typeof details.coordinates === 'object') {
+    const lat = Number.parseFloat(details.coordinates.lat);
+    const lon = Number.parseFloat(details.coordinates.lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) coordinates = { lat, lon };
+  }
+
+  const rating = Number.parseFloat(details.rating);
+  const lastChecked = details.lastChecked ? new Date(details.lastChecked).toISOString() : '';
+
+  return {
+    query: String(details.query ?? ''),
+    matched: Boolean(details.matched),
+    name: String(details.name ?? ''),
+    category: String(details.category ?? ''),
+    contact,
+    coordinates,
+    rating: Number.isFinite(rating) ? rating : null,
+    price: details.price === undefined || details.price === null ? '' : String(details.price),
+    source_url: String(details.source_url ?? ''),
+    lastChecked,
+    sources: normalizeLiveSources(details.sources),
+    weather: normalizeLiveWeather(details.weather),
+  };
+}
+
 function normalizeItinerary(x) {
   const obj = (x && typeof x === 'object') ? x : {};
   const stops = Array.isArray(obj.stops) ? obj.stops : [];
@@ -696,6 +777,7 @@ function normalizeItinerary(x) {
       fun_fact: String(stop?.fun_fact ?? ''),
       highlight: String(stop?.highlight ?? ''),
       food_pick: String(stop?.food_pick ?? ''),
+      live_details: normalizeLiveDetails(stop?.live_details),
     })),
   };
 }
@@ -726,7 +808,221 @@ function createEmptyStop() {
     fun_fact: '',
     highlight: '',
     food_pick: '',
+    live_details: null,
   };
+}
+
+function findLiveContainer(index) {
+  if (!itineraryContainer) return null;
+  return itineraryContainer.querySelector(`.itinerary-stop__live[data-stop-index="${index}"]`);
+}
+
+function renderLiveDetailsInContainer(container, details, { loading = false, error = false, message = null } = {}) {
+  if (!container) return;
+  container.innerHTML = '';
+
+  const heading = document.createElement('h4');
+  heading.className = 'itinerary-stop__live-title';
+  heading.textContent = 'Live details';
+  container.appendChild(heading);
+
+  if (!details) {
+    const status = document.createElement('p');
+    status.className = 'itinerary-stop__live-status';
+    if (error) status.classList.add('itinerary-stop__live-status--error');
+    status.textContent = message || (loading ? 'Fetching live details…' : 'Live details will appear here soon.');
+    container.appendChild(status);
+    return;
+  }
+
+  const items = [];
+  const normalizedName = details.name || '';
+  const normalizedQuery = (details.query || '').toLowerCase();
+  if (normalizedName && normalizedName.toLowerCase() !== normalizedQuery) {
+    items.push({ label: 'Match', value: normalizedName });
+  }
+
+  if (details.category) items.push({ label: 'Category', value: details.category });
+  if (details.contact?.address) items.push({ label: 'Address', value: details.contact.address });
+  if (details.contact?.hours) items.push({ label: 'Hours', value: details.contact.hours });
+  if (details.contact?.phone) items.push({ label: 'Phone', value: details.contact.phone });
+  if (details.contact?.website) items.push({ label: 'Website', value: details.contact.website, link: true });
+
+  if (Number.isFinite(details.rating)) {
+    items.push({ label: 'Rating', value: `${details.rating.toFixed(1)} / 5` });
+  }
+
+  if (details.price) items.push({ label: 'Price', value: details.price });
+
+  if (details.weather) {
+    const pieces = [];
+    if (details.weather.conditions) pieces.push(details.weather.conditions);
+    if (Number.isFinite(details.weather.temperature)) pieces.push(`${details.weather.temperature.toFixed(1)}°F`);
+    if (Number.isFinite(details.weather.feels_like)) pieces.push(`feels like ${details.weather.feels_like.toFixed(1)}°F`);
+    if (pieces.length) items.push({ label: 'Weather', value: pieces.join(', ') });
+  }
+
+  if (details.sources?.wikipedia?.extract) {
+    items.push({ label: 'About', value: details.sources.wikipedia.extract });
+  }
+
+  const wikipediaUrl = details.sources?.wikipedia?.url;
+  if (wikipediaUrl && wikipediaUrl !== details.source_url) {
+    items.push({ label: 'Wikipedia', value: wikipediaUrl, link: true });
+  }
+
+  if (details.source_url) {
+    items.push({ label: 'Source', value: details.source_url, link: true });
+  }
+
+  const lastChecked = details.lastChecked ? new Date(details.lastChecked).toLocaleString() : '';
+  if (lastChecked) {
+    items.push({ label: 'Checked', value: lastChecked });
+  }
+
+  if (!items.length) {
+    const status = document.createElement('p');
+    status.className = 'itinerary-stop__live-status';
+    status.textContent = message || 'Live data will appear after fetching.';
+    container.appendChild(status);
+    return;
+  }
+
+  const list = document.createElement('ul');
+  list.className = 'itinerary-stop__live-list';
+
+  items.forEach((item) => {
+    const textValue = typeof item.value === 'number' ? item.value.toString() : String(item.value ?? '');
+    if (!textValue) return;
+    const li = document.createElement('li');
+    const strong = document.createElement('strong');
+    strong.textContent = `${item.label}: `;
+    li.appendChild(strong);
+    if (item.link) {
+      const href = normalizeExternalUrl(textValue);
+      if (!href) {
+        li.appendChild(document.createTextNode(textValue));
+      } else {
+        const link = document.createElement('a');
+        link.href = href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = href.replace(/^https?:\/\//i, '');
+        li.appendChild(link);
+      }
+    } else {
+      li.appendChild(document.createTextNode(textValue));
+    }
+    list.appendChild(li);
+  });
+
+  container.appendChild(list);
+}
+
+function updateStopLiveSection(index, details, options = {}) {
+  const container = findLiveContainer(index);
+  if (!container) return;
+  renderLiveDetailsInContainer(container, details, options);
+}
+
+function shouldRefreshLiveDetails(stop, query) {
+  if (!stop?.live_details) return true;
+  const details = stop.live_details;
+  if ((details.query || '').toLowerCase() !== query.toLowerCase()) return true;
+  if (!details.lastChecked) return true;
+  const timestamp = Date.parse(details.lastChecked);
+  if (Number.isNaN(timestamp)) return true;
+  return (Date.now() - timestamp) > 4 * 60 * 60 * 1000;
+}
+
+async function fetchLiveDetailsForStop(trip, index) {
+  if (!trip || !Array.isArray(trip.stops) || !trip.stops[index]) return;
+  const stop = trip.stops[index];
+  const query = (stop.title || stop.address || '').trim();
+  if (!query) return;
+
+  if (stop.live_details && !shouldRefreshLiveDetails(stop, query)) {
+    updateStopLiveSection(index, stop.live_details);
+    return;
+  }
+
+  updateStopLiveSection(index, null, { loading: true });
+
+  const contextCity = Array.isArray(trip.cities_of_interest) && trip.cities_of_interest.length
+    ? trip.cities_of_interest[Math.min(index, trip.cities_of_interest.length - 1)] || trip.cities_of_interest[0]
+    : (trip.city_of_interest || '');
+
+  let latitude;
+  let longitude;
+  const lookup = stop.address || (contextCity ? `${stop.title || ''}, ${contextCity}`.trim() : stop.title || '');
+  if (lookup) {
+    try {
+      const coords = await geocodeLocation(lookup); // eslint-disable-line no-await-in-loop
+      if (coords) {
+        latitude = coords.lat;
+        longitude = coords.lon;
+      }
+    } catch (error) {
+      console.warn('Geocoding failed for live lookup', error);
+    }
+  }
+
+  const payload = {
+    query,
+    address: stop.address || '',
+    city: contextCity || '',
+  };
+  if (Number.isFinite(latitude)) payload.latitude = latitude;
+  if (Number.isFinite(longitude)) payload.longitude = longitude;
+
+  const cacheKey = JSON.stringify(payload);
+  let promise = liveLookupCache.get(cacheKey);
+  if (!promise) {
+    promise = fetchJSON('api/live_lookup.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then((response) => normalizeLiveDetails(response?.data))
+      .catch((error) => {
+        liveLookupCache.delete(cacheKey);
+        throw error;
+      });
+    liveLookupCache.set(cacheKey, promise);
+  }
+
+  try {
+    const details = await promise;
+    if (details) {
+      trip.stops[index].live_details = details;
+      if (currentTrip === trip) currentTrip.stops[index].live_details = details;
+      updateStopLiveSection(index, details);
+      if (saveButton) saveButton.dataset.itineraryPayload = JSON.stringify(currentTrip);
+    } else {
+      updateStopLiveSection(index, null, { message: 'No live details found for this stop yet.' });
+    }
+  } catch (error) {
+    console.warn('Live data lookup failed', error);
+    updateStopLiveSection(index, null, { error: true, message: 'Live details unavailable right now.' });
+  }
+}
+
+async function kickoffLiveDetails(trip) {
+  if (!trip || !Array.isArray(trip.stops)) return;
+  for (let index = 0; index < trip.stops.length; index += 1) {
+    const stop = trip.stops[index];
+    if (!stop) continue;
+    const query = (stop.title || stop.address || '').trim();
+    if (!query) continue;
+    if (stop.live_details && !shouldRefreshLiveDetails(stop, query)) {
+      updateStopLiveSection(index, stop.live_details);
+      continue;
+    }
+    try { // eslint-disable-line no-await-in-loop
+      await fetchLiveDetailsForStop(trip, index);
+    } catch (error) { // eslint-disable-line no-await-in-loop
+      console.warn('Live detail fetch failed', error);
+    }
+  }
 }
 
 function createCityField(value = '') {
@@ -873,6 +1169,14 @@ function renderTripDetails(trip) {
       food.append(label, document.createTextNode(stop.food_pick));
       article.appendChild(food);
     }
+
+    const liveContainer = document.createElement('div');
+    liveContainer.className = 'itinerary-stop__live';
+    liveContainer.dataset.stopIndex = String(index);
+    renderLiveDetailsInContainer(liveContainer, stop?.live_details || null, {
+      message: stop?.live_details ? null : 'Live details will appear here soon.',
+    });
+    article.appendChild(liveContainer);
 
     itineraryContainer.appendChild(article);
   });
@@ -1033,6 +1337,10 @@ function applyTripState(trip) {
   updateMap(currentTrip).catch((e) => {
     console.error('Map rendering failed:', e);
     resetMap('Map preview unavailable for this itinerary.');
+  });
+
+  kickoffLiveDetails(currentTrip).catch((error) => {
+    console.warn('Live details refresh failed', error);
   });
 }
 
@@ -1544,6 +1852,10 @@ if (editorStops) {
     const index = Number.parseInt(wrapper.dataset.index ?? '', 10);
     if (!currentTrip || Number.isNaN(index) || !currentTrip.stops[index]) return;
     currentTrip.stops[index][input.dataset.field] = input.value;
+    if (currentTrip.stops[index].live_details) {
+      delete currentTrip.stops[index].live_details;
+      updateStopLiveSection(index, null, { message: 'Live details will refresh after you apply edits.' });
+    }
     markEditorDirty();
   });
 
@@ -1585,6 +1897,10 @@ if (applyEditsButton) {
     updateMap(currentTrip).catch((e) => {
       console.error('Map rendering failed:', e);
       resetMap('Map preview unavailable for this itinerary.');
+    });
+
+    kickoffLiveDetails(currentTrip).catch((error) => {
+      console.warn('Live details refresh failed', error);
     });
   });
 }

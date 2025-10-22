@@ -548,6 +548,7 @@ final class OpenAIClient
                 'fun_fact'        => isset($s['fun_fact']) ? (string)$s['fun_fact'] : '',
                 'highlight'       => isset($s['highlight']) ? (string)$s['highlight'] : '',
                 'food_pick'       => isset($s['food_pick']) ? (string)$s['food_pick'] : '',
+                'live_details'    => $this->normalizeStopLiveDetails($s['live_details'] ?? null),
             ];
         }
 
@@ -570,6 +571,102 @@ final class OpenAIClient
             'id'                   => $x['id'] ?? null,
             'stops'                => $stopsOut,
         ];
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<string, mixed>|null
+     */
+    private function normalizeStopLiveDetails($value): ?array
+    {
+        if (!is_array($value)) {
+            return null;
+        }
+
+        $contact = [
+            'address' => '',
+            'hours' => '',
+            'phone' => '',
+            'website' => '',
+        ];
+        if (isset($value['contact']) && is_array($value['contact'])) {
+            foreach ($contact as $key => $_) {
+                if (isset($value['contact'][$key])) {
+                    $contact[$key] = (string) $value['contact'][$key];
+                }
+            }
+        }
+
+        $coordinates = null;
+        if (isset($value['coordinates']) && is_array($value['coordinates'])) {
+            $lat = isset($value['coordinates']['lat']) ? (float) $value['coordinates']['lat'] : null;
+            $lon = isset($value['coordinates']['lon']) ? (float) $value['coordinates']['lon'] : null;
+            if ($lat !== null && $lon !== null && is_finite($lat) && is_finite($lon)) {
+                $coordinates = ['lat' => $lat, 'lon' => $lon];
+            }
+        }
+
+        $rating = null;
+        if (isset($value['rating']) && is_numeric($value['rating'])) {
+            $rating = (float) $value['rating'];
+        }
+
+        $weather = null;
+        if (isset($value['weather']) && is_array($value['weather'])) {
+            $weather = [
+                'temperature' => isset($value['weather']['temperature']) && is_numeric($value['weather']['temperature'])
+                    ? (float) $value['weather']['temperature']
+                    : null,
+                'feels_like' => isset($value['weather']['feels_like']) && is_numeric($value['weather']['feels_like'])
+                    ? (float) $value['weather']['feels_like']
+                    : null,
+                'conditions' => isset($value['weather']['conditions']) ? (string) $value['weather']['conditions'] : '',
+                'updated_at' => isset($value['weather']['updated_at']) ? (string) $value['weather']['updated_at'] : '',
+                'source_url' => isset($value['weather']['source_url']) ? (string) $value['weather']['source_url'] : '',
+            ];
+        }
+
+        return [
+            'query' => isset($value['query']) ? (string) $value['query'] : '',
+            'matched' => !empty($value['matched']),
+            'name' => isset($value['name']) ? (string) $value['name'] : '',
+            'category' => isset($value['category']) ? (string) $value['category'] : '',
+            'contact' => $contact,
+            'coordinates' => $coordinates,
+            'rating' => $rating,
+            'price' => isset($value['price']) ? (string) $value['price'] : '',
+            'source_url' => isset($value['source_url']) ? (string) $value['source_url'] : '',
+            'lastChecked' => isset($value['lastChecked']) ? (string) $value['lastChecked'] : '',
+            'sources' => isset($value['sources']) && is_array($value['sources']) ? $this->normalizeLiveSources($value['sources']) : [],
+            'weather' => $weather,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $sources
+     * @return array<string, array<string, mixed>>
+     */
+    private function normalizeLiveSources(array $sources): array
+    {
+        $normalized = [];
+        foreach ($sources as $key => $data) {
+            if (!is_array($data)) {
+                continue;
+            }
+            $entry = [];
+            foreach ($data as $field => $value) {
+                if (is_string($value)) {
+                    $entry[(string) $field] = $value;
+                } elseif (is_numeric($value)) {
+                    $entry[(string) $field] = 0 + $value;
+                }
+            }
+            if ($entry !== []) {
+                $normalized[(string) $key] = $entry;
+            }
+        }
+
+        return $normalized;
     }
 
     private function shouldRetryWithoutSchema(\RuntimeException $exception): bool
