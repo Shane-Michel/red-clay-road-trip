@@ -63,7 +63,7 @@ The first request will automatically create the SQLite database at `data/trips.s
 | Variable         | Description                                  |
 | ---------------- | -------------------------------------------- |
 | `OPENAI_API_KEY` | Required. Used to authenticate with OpenAI. |
-| `OPENAI_MODEL` | Optional. Overrides the default `gpt-4-nano` model used for itinerary generation. |
+| `OPENAI_MODEL` | Optional. Overrides the default `gpt-4.1-nano` model used for itinerary generation. |
 | `OPENTRIPMAP_API_KEY` | Required for live lookups that enrich stops with OpenTripMap data. |
 | `YELP_API_KEY` | Optional. Adds Yelp business ratings, prices, and phone numbers when available. |
 | `OPENWEATHER_API_KEY` | Optional. Fetches current weather snapshots for each stop. |
