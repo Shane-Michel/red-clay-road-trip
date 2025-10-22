@@ -835,6 +835,73 @@ function renderLiveDetailsInContainer(container, details, { loading = false, err
     return;
   }
 
+  let ratingHandledInBadge = false;
+  const tripAdvisorSource = details.sources?.tripadvisor;
+  const bubbleImageUrl = tripAdvisorSource?.rating_image_url || tripAdvisorSource?.rating_image_url_small || '';
+  const normalizedBubbleUrl = bubbleImageUrl ? normalizeExternalUrl(bubbleImageUrl) : '';
+
+  if (tripAdvisorSource && normalizedBubbleUrl) {
+    ratingHandledInBadge = true;
+    const badge = document.createElement('div');
+    badge.className = 'tripadvisor-badge';
+
+    const brand = document.createElement('div');
+    brand.className = 'tripadvisor-badge__brand';
+    const logo = document.createElement('img');
+    logo.src = 'assets/img/tripadvisor-ollie-black.svg';
+    logo.alt = 'Tripadvisor';
+    logo.loading = 'lazy';
+    brand.appendChild(logo);
+    badge.appendChild(brand);
+
+    const content = document.createElement('div');
+    content.className = 'tripadvisor-badge__content';
+
+    const ratingRow = document.createElement('div');
+    ratingRow.className = 'tripadvisor-badge__rating';
+
+    const ratingImage = document.createElement('img');
+    ratingImage.src = normalizedBubbleUrl;
+    ratingImage.alt = 'Tripadvisor bubble rating';
+    ratingImage.loading = 'lazy';
+    ratingRow.appendChild(ratingImage);
+
+    const badgeRatingValue = Number.isFinite(details.rating)
+      ? details.rating
+      : Number.parseFloat(tripAdvisorSource.rating);
+    if (Number.isFinite(badgeRatingValue)) {
+      const score = document.createElement('span');
+      score.className = 'tripadvisor-badge__rating-score';
+      score.textContent = badgeRatingValue.toFixed(1);
+      ratingRow.appendChild(score);
+    }
+
+    content.appendChild(ratingRow);
+
+    const meta = document.createElement('p');
+    meta.className = 'tripadvisor-badge__meta';
+    const reviewCount = Number.parseInt(tripAdvisorSource.review_count, 10);
+    const metaParts = ['Tripadvisor'];
+    if (Number.isFinite(reviewCount) && reviewCount > 0) {
+      metaParts.push(`Based on ${reviewCount.toLocaleString()} reviews`);
+    }
+    meta.textContent = metaParts.join(' • ');
+    content.appendChild(meta);
+
+    if (tripAdvisorSource.url) {
+      const link = document.createElement('a');
+      link.className = 'tripadvisor-badge__link';
+      link.href = normalizeExternalUrl(tripAdvisorSource.url);
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = 'See it on Tripadvisor';
+      content.appendChild(link);
+    }
+
+    badge.appendChild(content);
+    container.appendChild(badge);
+  }
+
   const items = [];
   const normalizedName = details.name || '';
   const normalizedQuery = (details.query || '').toLowerCase();
@@ -848,7 +915,7 @@ function renderLiveDetailsInContainer(container, details, { loading = false, err
   if (details.contact?.phone) items.push({ label: 'Phone', value: details.contact.phone });
   if (details.contact?.website) items.push({ label: 'Website', value: details.contact.website, link: true });
 
-  if (Number.isFinite(details.rating)) {
+  if (Number.isFinite(details.rating) && !ratingHandledInBadge) {
     items.push({ label: 'Rating', value: `${details.rating.toFixed(1)} / 5` });
   }
 
