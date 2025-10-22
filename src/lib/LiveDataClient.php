@@ -317,7 +317,8 @@ final class LiveDataClient
         }
 
         $url = 'https://api.content.tripadvisor.com/api/v1/location/search?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
-        $listing = $this->requestJson($url);
+        $tripAdvisorHeaders = $this->tripAdvisorHeaders();
+        $listing = $this->requestJson($url, $tripAdvisorHeaders);
         if ($listing === null || !isset($listing['data']) || !is_array($listing['data'])) {
             return null;
         }
@@ -360,10 +361,26 @@ final class LiveDataClient
                 'language' => 'en',
             ];
             $detailUrl = 'https://api.content.tripadvisor.com/api/v1/location/' . rawurlencode($locationId) . '/details?' . http_build_query($detailParams, '', '&', PHP_QUERY_RFC3986);
-            $detail = $this->requestJson($detailUrl);
+            $detail = $this->requestJson($detailUrl, $tripAdvisorHeaders);
         }
 
         return $this->formatTripAdvisorDetail($best, $detail);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function tripAdvisorHeaders(): array
+    {
+        $origin = trim($this->readFromEnvironment('TRIPADVISOR_ALLOWED_ORIGIN'));
+        if ($origin === '') {
+            $origin = 'https://redclayroadtrip.s-sites.com';
+        }
+
+        return [
+            'Origin: ' . $origin,
+            'Referer: ' . $origin,
+        ];
     }
 
     /**
