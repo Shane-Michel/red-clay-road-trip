@@ -142,6 +142,20 @@ final class OpenAIClient
         }
 
         if ($rawItinerary === null) {
+            $outputText = $response['output_text'] ?? null;
+            if (is_array($outputText)) {
+                foreach ($outputText as $textChunk) {
+                    if (is_string($textChunk) && trim($textChunk) !== '') {
+                        $rawItinerary = $textChunk;
+                        break;
+                    }
+                }
+            } elseif (is_string($outputText) && trim($outputText) !== '') {
+                $rawItinerary = $outputText;
+            }
+        }
+
+        if ($rawItinerary === null) {
             // Return a normalized empty object to keep FE happy
             return $this->normalizeItinerary([]);
         }
@@ -149,6 +163,8 @@ final class OpenAIClient
         if (is_array($rawItinerary)) {
             return $this->normalizeItinerary($rawItinerary);
         }
+
+        $rawItinerary = $this->stripJsonCodeFence((string) $rawItinerary);
 
         try {
             /** @var array<string, mixed> $decoded */
@@ -171,12 +187,39 @@ final class OpenAIClient
      */
     private function extractRawItinerary($part)
     {
+        if (is_string($part)) {
+            $part = trim($part);
+            return $part === '' ? null : $part;
+        }
+
         if (!is_array($part)) {
             return null;
         }
 
-        if (isset($part['json']) && is_array($part['json'])) {
-            return $part['json'];
+        if (isset($part['json'])) {
+            $json = $part['json'];
+            if (is_array($json)) {
+                return $json;
+            }
+            if (is_string($json)) {
+                $json = trim($json);
+                if ($json !== '') {
+                    return $json;
+                }
+            }
+        }
+
+        if (isset($part['data'])) {
+            $data = $part['data'];
+            if (is_array($data)) {
+                return $data;
+            }
+            if (is_string($data)) {
+                $data = trim($data);
+                if ($data !== '') {
+                    return $data;
+                }
+            }
         }
 
         $text = $part['text'] ?? null;
@@ -184,7 +227,30 @@ final class OpenAIClient
             return $text;
         }
 
+        if (isset($part['content']) && is_array($part['content'])) {
+            foreach ($part['content'] as $nested) {
+                $candidate = $this->extractRawItinerary($nested);
+                if ($candidate !== null) {
+                    return $candidate;
+                }
+            }
+        }
+
         return null;
+    }
+
+    private function stripJsonCodeFence(string $value): string
+    {
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return '';
+        }
+
+        if (preg_match('/^```[a-zA-Z0-9]*\s*(.*?)```$/s', $trimmed, $matches) === 1) {
+            return trim($matches[1]);
+        }
+
+        return $trimmed;
     }
 
     /**
