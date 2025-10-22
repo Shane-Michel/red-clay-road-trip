@@ -833,7 +833,27 @@ final class LiveDataClient
         if ($title === '') {
             return null;
         }
-        $url = 'https://en.wikipedia.org/api/rest_v1/page/summary/' . rawurlencode(str_replace(' ', '_', $title));
+
+        $summary = $this->fetchWikipediaSummaryByTitle($title);
+        if ($summary !== null) {
+            return $summary;
+        }
+
+        $alternate = $this->searchWikipediaTitle($title);
+        if ($alternate !== null && strcasecmp($alternate, $title) !== 0) {
+            $summary = $this->fetchWikipediaSummaryByTitle($alternate);
+            if ($summary !== null) {
+                return $summary;
+            }
+        }
+
+        return null;
+    }
+
+    private function fetchWikipediaSummaryByTitle(string $title): ?array
+    {
+        $slug = rawurlencode(str_replace(' ', '_', $title));
+        $url = 'https://en.wikipedia.org/api/rest_v1/page/summary/' . $slug;
         $data = $this->requestJson($url, ['Accept: application/json; charset=utf-8']);
         if ($data === null || isset($data['type']) && $data['type'] === 'https://mediawiki.org/wiki/HyperSwitch/errors/not_found') {
             return null;
@@ -846,6 +866,48 @@ final class LiveDataClient
             'url' => $this->extractWikipediaUrl($data),
             'last_modified' => isset($data['timestamp']) ? (string) $data['timestamp'] : '',
         ];
+    }
+
+    private function searchWikipediaTitle(string $query): ?string
+    {
+        $query = trim($query);
+        if ($query === '') {
+            return null;
+        }
+
+        $params = [
+            'action' => 'query',
+            'list' => 'search',
+            'srsearch' => $query,
+            'srlimit' => 1,
+            'format' => 'json',
+            'utf8' => 1,
+        ];
+
+        $url = 'https://en.wikipedia.org/w/api.php?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+        $data = $this->requestJson($url, ['Accept: application/json; charset=utf-8']);
+        if ($data === null || !isset($data['query']) || !is_array($data['query'])) {
+            return null;
+        }
+
+        $search = $data['query']['search'] ?? null;
+        if (!is_array($search)) {
+            return null;
+        }
+
+        foreach ($search as $result) {
+            if (!is_array($result)) {
+                continue;
+            }
+            if (isset($result['title']) && is_string($result['title'])) {
+                $title = trim($result['title']);
+                if ($title !== '') {
+                    return $title;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
