@@ -303,6 +303,32 @@ body {
     gap: 0.75rem;
 }
 
+.field__input-row {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.field__input-row input {
+    flex: 1 1 240px;
+}
+
+.field__inline-btn {
+    padding: 0.75rem 1.4rem;
+    white-space: nowrap;
+}
+
+.field__status {
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+}
+
+.field__status--error {
+    color: var(--accent-dark);
+}
+
 .field__repeatable {
     display: flex;
     gap: 0.75rem;
