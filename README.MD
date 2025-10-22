@@ -66,6 +66,7 @@ The first request will automatically create the SQLite database at `data/trips.s
 | `OPENAI_MODEL` | Optional. Overrides the default `gpt-4.1-nano` model used for itinerary generation. |
 | `OPENTRIPMAP_API_KEY` | Required for live lookups that enrich stops with OpenTripMap data. |
 | `TRIPADVISOR_API_KEY` | Optional. Adds TripAdvisor search and detail results to live place lookups. |
+| `TRIPADVISOR_ALLOWED_ORIGIN` | Optional. Overrides the Origin/Referer headers sent to TripAdvisor (defaults to `https://redclayroadtrip.s-sites.com`). |
 | `OPENWEATHER_API_KEY` | Optional. Fetches current weather snapshots for each stop. |
 
 ## Development notes
