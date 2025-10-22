@@ -64,40 +64,10 @@ final class OpenAIClient
         $cityList = $cities ? implode(', ', $cities) : $city;
         $prefs = (string)($payload['traveler_preferences'] ?? 'None provided');
 
-        $requestBody = [
-            'model' => $this->model,
-            'input' => [
-                [
-                    'role' => 'system',
-                    'content' => 'You are a travel concierge who blends regional history, quirky discoveries, and foodie finds into road trip itineraries.',
-                ],
-                [
-                    'role' => 'user',
-                    'content' => sprintf(
-                        "Plan a story-rich road trip that mixes history, fun facts, hidden gems, and memorable food stops.\n\n" .
-                        "Start location: %s\nDeparture: %s\nCities to explore: %s\nTraveler preferences: %s\n\n" .
-                        "Provide a route overview, total drive time, and 4-6 stops that follow the cities in a logical order. " .
-                        "For each stop include: title, address, suggested duration, engaging description, story or cultural context, a fun fact, a highlight (interesting place or experience), a hidden bite (local food or drink pick), and a lighthearted challenge. " .
-                        "Close with practical travel tips and reminders.",
-                        $start,
-                        $depart,
-                        $cityList,
-                        $prefs
-                    ),
-                ],
-            ],
-            // Responses API: use text.format with a json_schema
-            'text' => [
-                'format' => [
-                    'type'   => 'json_schema',
-                    'name'   => 'historical_road_trip',
-                    'schema' => $this->schema(),
-                ],
-            ],
-        ];
+        $input = $this->buildInputMessages($start, $depart, $cityList, $prefs);
 
         try {
-            $response = $this->request($requestBody);
+            $response = $this->request($this->buildRequestBody($input, true));
         } catch (\Throwable $exception) {
             Logger::logThrowable($exception, [
                 'client_method' => __METHOD__,
@@ -108,7 +78,11 @@ final class OpenAIClient
                     'cities_of_interest' => $cities,
                 ],
             ]);
-            throw $exception;
+            if (!$exception instanceof \RuntimeException || !$this->shouldRetryWithoutSchema($exception)) {
+                throw $exception;
+            }
+
+            $response = $this->request($this->buildRequestBody($input, false));
         }
 
         $rawItinerary = null;
@@ -179,6 +153,60 @@ final class OpenAIClient
 
         // Normalize to guarantee keys your FE expects
         return $this->normalizeItinerary($decoded);
+    }
+
+    /**
+     * @return array<int, array<string, string>>
+     */
+    private function buildInputMessages(string $start, string $depart, string $cityList, string $prefs): array
+    {
+        $prompt = sprintf(
+            "Plan a story-rich road trip that mixes history, fun facts, hidden gems, and memorable food stops.\n\n" .
+            "Start location: %s\nDeparture: %s\nCities to explore: %s\nTraveler preferences: %s\n\n" .
+            "Provide a route overview, total drive time, and 4-6 stops that follow the cities in a logical order. " .
+            "For each stop include: title, address, suggested duration, engaging description, story or cultural context, a fun fact, a highlight (interesting place or experience), a hidden bite (local food or drink pick), and a lighthearted challenge. " .
+            "Close with practical travel tips and reminders.\n\nRespond with strict JSON that matches this structure (no commentary or markdown fences):\n%s",
+            $start,
+            $depart,
+            $cityList,
+            $prefs,
+            $this->jsonSkeleton()
+        );
+
+        return [
+            [
+                'role' => 'system',
+                'content' => 'You are a travel concierge who blends regional history, quirky discoveries, and foodie finds into road trip itineraries.',
+            ],
+            [
+                'role' => 'user',
+                'content' => $prompt,
+            ],
+        ];
+    }
+
+    /**
+     * @param array<int, array<string, string>> $input
+     * @return array<string, mixed>
+     */
+    private function buildRequestBody(array $input, bool $useSchema): array
+    {
+        $body = [
+            'model' => $this->model,
+            'input' => $input,
+        ];
+
+        if ($useSchema) {
+            $body['text'] = [
+                'format' => [
+                    'type'   => 'json_schema',
+                    'name'   => 'historical_road_trip',
+                    'schema' => $this->schema(),
+                ],
+            ];
+        }
+
+        return $body;
     }
 
     /**
@@ -459,6 +487,36 @@ final class OpenAIClient
         ];
     }
 
+    private function jsonSkeleton(): string
+    {
+        $example = [
+            'route_overview' => 'string',
+            'total_travel_time' => 'string',
+            'summary' => 'string',
+            'additional_tips' => 'string',
+            'start_location' => 'string',
+            'departure_datetime' => 'string',
+            'city_of_interest' => 'string',
+            'cities_of_interest' => ['string'],
+            'traveler_preferences' => 'string',
+            'stops' => [
+                [
+                    'title' => 'string',
+                    'address' => 'string',
+                    'duration' => 'string',
+                    'description' => 'string',
+                    'historical_note' => 'string',
+                    'challenge' => 'string',
+                    'fun_fact' => 'string',
+                    'highlight' => 'string',
+                    'food_pick' => 'string',
+                ],
+            ],
+        ];
+
+        return (string) json_encode($example, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    }
+
     /**
      * Normalize the itinerary so FE is always safe to render/use.
      * @param array<string, mixed> $x
@@ -512,6 +570,18 @@ final class OpenAIClient
             'id'                   => $x['id'] ?? null,
             'stops'                => $stopsOut,
         ];
+    }
+
+    private function shouldRetryWithoutSchema(\RuntimeException $exception): bool
+    {
+        $message = $exception->getMessage();
+        $message = strtolower($message);
+
+        if (strpos($message, 'text.format') !== false && strpos($message, 'not supported') !== false) {
+            return true;
+        }
+
+        return strpos($message, 'json_schema') !== false && strpos($message, 'not supported') !== false;
     }
 
     private function readFromEnvironment(string $key): string
