@@ -423,6 +423,18 @@ final class LiveDataClient
             $listing['web_url'] ?? null,
         ]);
 
+        $bubbleImageUrl = $this->coalesceString([
+            $detailData['rating_image_url'] ?? null,
+            $detailData['rating_image_url_large'] ?? null,
+            $listing['rating_image_url'] ?? null,
+            $listing['rating_image_url_large'] ?? null,
+        ]);
+
+        $bubbleImageSmallUrl = $this->coalesceString([
+            $detailData['rating_image_url_small'] ?? null,
+            $listing['rating_image_url_small'] ?? null,
+        ]);
+
         $source = $this->filterTripAdvisorSource([
             'id' => $this->coalesceString([
                 $detailData['location_id'] ?? null,
@@ -437,6 +449,8 @@ final class LiveDataClient
             'ranking' => isset($detailData['ranking']) && is_string($detailData['ranking'])
                 ? trim($detailData['ranking'])
                 : '',
+            'rating_image_url' => $bubbleImageUrl,
+            'rating_image_url_small' => $bubbleImageSmallUrl,
         ]);
 
         return [

@@ -520,6 +520,70 @@ body {
     background: rgba(255, 255, 255, 0.85);
 }
 
+.tripadvisor-badge {
+    display: flex;
+    gap: 0.85rem;
+    align-items: flex-start;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 12px;
+    background: #ffffff;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.75rem;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+    color: #141414;
+}
+
+.tripadvisor-badge__brand img {
+    display: block;
+    height: 24px;
+    width: auto;
+    min-height: 20px;
+}
+
+.tripadvisor-badge__content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.tripadvisor-badge__rating {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.tripadvisor-badge__rating img {
+    display: block;
+    min-width: 55px;
+    height: auto;
+    background: #ffffff;
+}
+
+.tripadvisor-badge__rating-score {
+    font-size: 1.35rem;
+    font-weight: 600;
+    line-height: 1;
+    color: #141414;
+}
+
+.tripadvisor-badge__meta {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #242424;
+}
+
+.tripadvisor-badge__link {
+    font-size: 0.85rem;
+    color: #141414;
+    text-decoration: underline;
+    font-weight: 600;
+}
+
+.tripadvisor-badge__link:hover,
+.tripadvisor-badge__link:focus {
+    color: #0f7253;
+}
+
 .itinerary-stop__live-title {
     margin: 0 0 0.5rem;
     font-size: 1rem;
