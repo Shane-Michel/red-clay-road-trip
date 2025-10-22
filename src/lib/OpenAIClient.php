@@ -111,25 +111,32 @@ final class OpenAIClient
             throw $exception;
         }
 
-        $content = $response['output'][0]['content'] ?? null;
         $rawItinerary = null;
 
-        if (is_array($content)) {
-            foreach ($content as $part) {
-                if (!is_array($part)) {
+        $output = $response['output'] ?? null;
+        if (is_array($output)) {
+            foreach ($output as $message) {
+                $candidate = $this->extractRawItinerary($message);
+                if ($candidate !== null) {
+                    $rawItinerary = $candidate;
+                    break;
+                }
+
+                if (!is_array($message)) {
                     continue;
                 }
 
-                // Responses API with json_schema may return `output_json` blocks
-                if (isset($part['json']) && is_array($part['json'])) {
-                    $rawItinerary = $part['json'];
-                    break;
+                $content = $message['content'] ?? null;
+                if (!is_array($content)) {
+                    continue;
                 }
 
-                $text = $part['text'] ?? null;
-                if (is_string($text) && trim($text) !== '') {
-                    $rawItinerary = $text;
-                    break;
+                foreach ($content as $part) {
+                    $candidate = $this->extractRawItinerary($part);
+                    if ($candidate !== null) {
+                        $rawItinerary = $candidate;
+                        break 2;
+                    }
                 }
             }
         }
@@ -156,6 +163,28 @@ final class OpenAIClient
 
         // Normalize to guarantee keys your FE expects
         return $this->normalizeItinerary($decoded);
+    }
+
+    /**
+     * @param mixed $part
+     * @return array<string, mixed>|string|null
+     */
+    private function extractRawItinerary($part)
+    {
+        if (!is_array($part)) {
+            return null;
+        }
+
+        if (isset($part['json']) && is_array($part['json'])) {
+            return $part['json'];
+        }
+
+        $text = $part['text'] ?? null;
+        if (is_string($text) && trim($text) !== '') {
+            return $text;
+        }
+
+        return null;
     }
 
     /**
