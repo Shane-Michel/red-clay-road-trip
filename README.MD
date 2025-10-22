@@ -8,7 +8,7 @@ Red Clay Road Trip is a single-page web experience that builds an AI-assisted ad
 - **Rich client experience** with a responsive layout, dark-mode support, and dynamic rendering.
 - **Trip history** stored locally in SQLite so returning visitors can revisit or reload previous adventures.
 - **Beyond history**: every stop now includes fun facts, can't-miss highlights, and hidden bites in addition to contextual stories.
-- **Live place insights** using OpenTripMap and Wikipedia, with optional OpenWeather snapshots when API keys are available.
+- **Live place insights** using TripAdvisor, OpenTripMap, and Wikipedia, with optional OpenWeather snapshots when API keys are available.
 
 ## Getting started
 
@@ -65,6 +65,7 @@ The first request will automatically create the SQLite database at `data/trips.s
 | `OPENAI_API_KEY` | Required. Used to authenticate with OpenAI. |
 | `OPENAI_MODEL` | Optional. Overrides the default `gpt-4.1-nano` model used for itinerary generation. |
 | `OPENTRIPMAP_API_KEY` | Required for live lookups that enrich stops with OpenTripMap data. |
+| `TRIPADVISOR_API_KEY` | Optional. Adds TripAdvisor search and detail results to live place lookups. |
 | `OPENWEATHER_API_KEY` | Optional. Fetches current weather snapshots for each stop. |
 
 ## Development notes
