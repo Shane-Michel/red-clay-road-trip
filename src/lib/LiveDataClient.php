@@ -740,6 +740,83 @@ final class LiveDataClient
         return $summary;
     }
 
+    /**
+     * @param array{lat: float, lon: float} $coordinates
+     * @return array<string, mixed>|null
+     */
+    private function fetchFromOpenWeather(array $coordinates): ?array
+    {
+        $apiKey = $this->readFromEnvironment('OPENWEATHER_API_KEY');
+        if ($apiKey === '') {
+            return null;
+        }
+
+        $params = [
+            'lat' => $coordinates['lat'],
+            'lon' => $coordinates['lon'],
+            'appid' => $apiKey,
+            'units' => 'imperial',
+        ];
+
+        $url = 'https://api.openweathermap.org/data/2.5/weather?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+        $data = $this->requestJson($url);
+        if ($data === null) {
+            return null;
+        }
+
+        $main = isset($data['main']) && is_array($data['main']) ? $data['main'] : [];
+        $temperature = isset($main['temp']) && is_numeric($main['temp']) ? (float) $main['temp'] : null;
+        $feelsLike = isset($main['feels_like']) && is_numeric($main['feels_like']) ? (float) $main['feels_like'] : null;
+
+        $conditions = '';
+        if (isset($data['weather']) && is_array($data['weather'])) {
+            foreach ($data['weather'] as $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+                if (isset($entry['description']) && is_string($entry['description'])) {
+                    $description = $this->formatSentence($entry['description']);
+                    if ($description !== '') {
+                        $conditions = $description;
+                        break;
+                    }
+                }
+            }
+        }
+
+        $updatedAt = '';
+        if (isset($data['dt']) && is_numeric($data['dt'])) {
+            try {
+                $timestamp = (int) $data['dt'];
+                $date = (new \DateTimeImmutable('@' . $timestamp))->setTimezone(new \DateTimeZone('UTC'));
+                $updatedAt = $date->format(\DateTimeInterface::ATOM);
+            } catch (\Throwable $exception) {
+                Logger::logThrowable($exception, [
+                    'client_method' => __METHOD__,
+                    'stage' => 'parse_timestamp',
+                ]);
+            }
+        }
+        if ($updatedAt === '') {
+            $updatedAt = $this->now();
+        }
+
+        $sourceUrl = '';
+        if (isset($data['id']) && is_numeric($data['id'])) {
+            $sourceUrl = 'https://openweathermap.org/city/' . (int) $data['id'];
+        } else {
+            $sourceUrl = 'https://openweathermap.org/';
+        }
+
+        return [
+            'temperature' => $temperature,
+            'feels_like' => $feelsLike,
+            'conditions' => $conditions,
+            'updated_at' => $updatedAt,
+            'source_url' => $sourceUrl,
+        ];
+    }
+
     private function extractWikipediaTitle(string $slug): ?string
     {
         $slug = trim($slug);
