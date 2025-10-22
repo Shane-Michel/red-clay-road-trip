@@ -83,6 +83,7 @@ TripRepository::initialize($scope);
                 </div>
                 <button type="submit" class="btn">Generate Road Trip</button>
             </form>
+            <div id="generation-status" class="generation-status" role="status" aria-live="polite" hidden></div>
         </section>
 
         <section id="results" class="results" aria-live="polite" hidden>
