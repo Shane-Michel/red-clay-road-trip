@@ -78,7 +78,32 @@ final class LiveDataClient
             $result['sources']['opentripmap'] = $openTrip['source'];
         }
 
-        $wikipedia = $this->fetchFromWikipedia($openTrip, $query);
+        $tripAdvisor = $this->fetchFromTripAdvisor($query, $context, $result['coordinates']);
+        if ($tripAdvisor !== null) {
+            $result['matched'] = true;
+            if ($tripAdvisor['name'] !== '') {
+                $result['name'] = $tripAdvisor['name'];
+            }
+            if ($tripAdvisor['category'] !== '') {
+                $result['category'] = $tripAdvisor['category'];
+            }
+            if ($tripAdvisor['coordinates'] !== null) {
+                $result['coordinates'] = $tripAdvisor['coordinates'];
+            }
+            $result['contact'] = $this->mergeContact($result['contact'], $tripAdvisor['contact']);
+            if ($tripAdvisor['rating'] !== null) {
+                $result['rating'] = $tripAdvisor['rating'];
+            }
+            if ($tripAdvisor['price'] !== '') {
+                $result['price'] = $tripAdvisor['price'];
+            }
+            if ($result['source_url'] === '' && $tripAdvisor['source_url'] !== '') {
+                $result['source_url'] = $tripAdvisor['source_url'];
+            }
+            $result['sources']['tripadvisor'] = $tripAdvisor['source'];
+        }
+
+        $wikipedia = $this->fetchFromWikipedia($openTrip ?? $tripAdvisor, $query);
         if ($wikipedia !== null) {
             $result['sources']['wikipedia'] = $wikipedia;
             if ($result['source_url'] === '' && isset($wikipedia['url']) && $wikipedia['url'] !== '') {
@@ -269,6 +294,424 @@ final class LiveDataClient
     }
 
     /**
+     * @param array<string, mixed> $context
+     * @param array{lat: float, lon: float}|null $coordinates
+     * @return array<string, mixed>|null
+     */
+    private function fetchFromTripAdvisor(string $query, array $context, ?array $coordinates): ?array
+    {
+        $apiKey = $this->readFromEnvironment('TRIPADVISOR_API_KEY');
+        if ($apiKey === '') {
+            return null;
+        }
+
+        $searchQuery = $this->buildTripAdvisorSearchQuery($query, $context);
+        $params = [
+            'key' => $apiKey,
+            'searchQuery' => $searchQuery,
+            'language' => 'en',
+        ];
+
+        if ($coordinates !== null) {
+            $params['latLong'] = sprintf('%.6f,%.6f', $coordinates['lat'], $coordinates['lon']);
+        }
+
+        $url = 'https://api.content.tripadvisor.com/api/v1/location/search?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+        $listing = $this->requestJson($url);
+        if ($listing === null || !isset($listing['data']) || !is_array($listing['data'])) {
+            return null;
+        }
+
+        $best = null;
+        $bestScore = -INF;
+        foreach ($listing['data'] as $candidate) {
+            if (!is_array($candidate)) {
+                continue;
+            }
+
+            $name = isset($candidate['name']) ? trim((string) $candidate['name']) : '';
+            if ($name === '') {
+                continue;
+            }
+
+            $score = $this->nameSimilarity($query, $name);
+            if ($coordinates !== null && isset($candidate['latitude'], $candidate['longitude']) && is_numeric($candidate['latitude']) && is_numeric($candidate['longitude'])) {
+                $distance = $this->distanceInKilometers($coordinates['lat'], $coordinates['lon'], (float) $candidate['latitude'], (float) $candidate['longitude']);
+                if (is_finite($distance)) {
+                    $score += max(0.0, 1.0 - min($distance, 50.0) / 50.0);
+                }
+            }
+
+            if ($score > $bestScore) {
+                $best = $candidate;
+                $bestScore = $score;
+            }
+        }
+
+        if ($best === null) {
+            return null;
+        }
+
+        $detail = null;
+        $locationId = isset($best['location_id']) ? trim((string) $best['location_id']) : '';
+        if ($locationId !== '') {
+            $detailParams = [
+                'key' => $apiKey,
+                'language' => 'en',
+            ];
+            $detailUrl = 'https://api.content.tripadvisor.com/api/v1/location/' . rawurlencode($locationId) . '/details?' . http_build_query($detailParams, '', '&', PHP_QUERY_RFC3986);
+            $detail = $this->requestJson($detailUrl);
+        }
+
+        return $this->formatTripAdvisorDetail($best, $detail);
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     */
+    private function buildTripAdvisorSearchQuery(string $query, array $context): string
+    {
+        $parts = [];
+        $query = trim($query);
+        if ($query !== '') {
+            $parts[] = $query;
+        }
+
+        foreach (['city', 'region', 'country'] as $key) {
+            if (isset($context[$key]) && is_string($context[$key])) {
+                $value = trim($context[$key]);
+                if ($value !== '') {
+                    $parts[] = $value;
+                }
+            }
+        }
+
+        if (!$parts) {
+            return $query;
+        }
+
+        $parts = array_values(array_unique($parts));
+        return implode(' ', $parts);
+    }
+
+    /**
+     * @param array<string, mixed> $listing
+     * @param array<string, mixed>|null $detail
+     * @return array<string, mixed>
+     */
+    private function formatTripAdvisorDetail(array $listing, ?array $detail): array
+    {
+        $detailData = is_array($detail) ? $detail : [];
+        $name = $this->coalesceString([
+            $detailData['name'] ?? null,
+            $listing['name'] ?? null,
+        ]);
+
+        $coordinates = $this->extractTripAdvisorCoordinates($listing, $detailData);
+        $contact = $this->extractTripAdvisorContact($listing, $detailData);
+
+        $rating = null;
+        if (isset($detailData['rating']) && is_numeric($detailData['rating'])) {
+            $rating = (float) $detailData['rating'];
+        } elseif (isset($listing['rating']) && is_numeric($listing['rating'])) {
+            $rating = (float) $listing['rating'];
+        }
+
+        $price = $this->extractTripAdvisorPrice($listing, $detailData);
+        $sourceUrl = $this->coalesceString([
+            $detailData['web_url'] ?? null,
+            $listing['web_url'] ?? null,
+        ]);
+
+        $source = $this->filterTripAdvisorSource([
+            'id' => $this->coalesceString([
+                $detailData['location_id'] ?? null,
+                $listing['location_id'] ?? null,
+            ]),
+            'url' => $sourceUrl,
+            'name' => $name !== '' ? $name : ($listing['name'] ?? ''),
+            'rating' => $rating,
+            'review_count' => isset($detailData['num_reviews']) && is_numeric($detailData['num_reviews'])
+                ? (int) $detailData['num_reviews']
+                : null,
+            'ranking' => isset($detailData['ranking']) && is_string($detailData['ranking'])
+                ? trim($detailData['ranking'])
+                : '',
+        ]);
+
+        return [
+            'name' => $name,
+            'category' => $this->extractTripAdvisorCategory($listing, $detailData),
+            'coordinates' => $coordinates,
+            'contact' => $contact,
+            'rating' => $rating,
+            'price' => $price,
+            'source_url' => $sourceUrl,
+            'source' => $source,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $listing
+     * @param array<string, mixed> $detail
+     * @return array{lat: float, lon: float}|null
+     */
+    private function extractTripAdvisorCoordinates(array $listing, array $detail): ?array
+    {
+        $latitude = null;
+        $longitude = null;
+
+        foreach ([
+            $detail['latitude'] ?? null,
+            $listing['latitude'] ?? null,
+        ] as $candidateLatitude) {
+            if (is_numeric($candidateLatitude)) {
+                $latitude = (float) $candidateLatitude;
+                break;
+            }
+        }
+
+        foreach ([
+            $detail['longitude'] ?? null,
+            $listing['longitude'] ?? null,
+        ] as $candidateLongitude) {
+            if (is_numeric($candidateLongitude)) {
+                $longitude = (float) $candidateLongitude;
+                break;
+            }
+        }
+
+        if ($latitude !== null && $longitude !== null) {
+            return ['lat' => $latitude, 'lon' => $longitude];
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $listing
+     * @param array<string, mixed> $detail
+     * @return array<string, string>
+     */
+    private function extractTripAdvisorContact(array $listing, array $detail): array
+    {
+        $address = $this->formatTripAdvisorAddress($detail['address_obj'] ?? null);
+        if ($address === '') {
+            $address = $this->formatTripAdvisorAddress($listing['address_obj'] ?? null);
+        }
+        if ($address === '' && isset($listing['address']) && is_string($listing['address'])) {
+            $address = trim($listing['address']);
+        }
+
+        $hours = $this->extractTripAdvisorHours($detail['hours'] ?? ($listing['hours'] ?? null));
+
+        return [
+            'address' => $address,
+            'hours' => $hours,
+            'phone' => $this->coalesceString([
+                $detail['phone'] ?? null,
+                $detail['phone_number'] ?? null,
+                $listing['phone'] ?? null,
+                $listing['phone_number'] ?? null,
+            ]),
+            'website' => $this->coalesceString([
+                $detail['website'] ?? null,
+                $detail['website_url'] ?? null,
+                $listing['website'] ?? null,
+            ]),
+        ];
+    }
+
+    private function extractTripAdvisorHours($hours): string
+    {
+        if (!is_array($hours)) {
+            return '';
+        }
+
+        if (isset($hours['weekday_text']) && is_array($hours['weekday_text'])) {
+            $lines = array_filter(array_map(static function ($line): string {
+                return is_string($line) ? trim($line) : '';
+            }, $hours['weekday_text']));
+            if ($lines) {
+                return implode(' • ', $lines);
+            }
+        }
+
+        foreach (['display_text', 'text'] as $key) {
+            if (isset($hours[$key]) && is_string($hours[$key])) {
+                $value = trim($hours[$key]);
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+        }
+
+        if (isset($hours['week_ranges']) && is_array($hours['week_ranges'])) {
+            $daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+            $segments = [];
+            foreach ($hours['week_ranges'] as $index => $ranges) {
+                if (!is_array($ranges)) {
+                    continue;
+                }
+                $formattedRanges = [];
+                foreach ($ranges as $range) {
+                    if (!is_array($range)) {
+                        continue;
+                    }
+                    $open = isset($range['open_time']) ? trim((string) $range['open_time']) : '';
+                    $close = isset($range['close_time']) ? trim((string) $range['close_time']) : '';
+                    if ($open !== '' && $close !== '') {
+                        $formattedRanges[] = $open . '–' . $close;
+                    }
+                }
+                if ($formattedRanges) {
+                    $dayName = is_string($index)
+                        ? $this->formatSentence(str_replace('_', ' ', $index))
+                        : ($daysOfWeek[(int) $index] ?? (string) $index);
+                    $segments[] = $dayName . ': ' . implode(', ', $formattedRanges);
+                }
+            }
+            if ($segments) {
+                return implode(' • ', $segments);
+            }
+        }
+
+        return '';
+    }
+
+    private function formatTripAdvisorAddress($value): string
+    {
+        if (!is_array($value)) {
+            return '';
+        }
+
+        if (isset($value['address_string']) && is_string($value['address_string'])) {
+            $address = trim($value['address_string']);
+            if ($address !== '') {
+                return $address;
+            }
+        }
+
+        $parts = [];
+        foreach (['street1', 'street2', 'city', 'state', 'postalcode', 'country'] as $key) {
+            if (isset($value[$key]) && is_string($value[$key])) {
+                $piece = trim($value[$key]);
+                if ($piece !== '') {
+                    $parts[] = $piece;
+                }
+            }
+        }
+
+        return $parts ? implode(', ', $parts) : '';
+    }
+
+    /**
+     * @param array<string, mixed> $listing
+     * @param array<string, mixed> $detail
+     */
+    private function extractTripAdvisorCategory(array $listing, array $detail): string
+    {
+        $categories = [];
+
+        if (isset($detail['subcategory']) && is_array($detail['subcategory'])) {
+            foreach ($detail['subcategory'] as $entry) {
+                if (is_array($entry) && isset($entry['name']) && is_string($entry['name'])) {
+                    $label = trim($entry['name']);
+                    if ($label !== '') {
+                        $categories[] = $this->formatSentence($label);
+                    }
+                }
+            }
+        }
+
+        if (!$categories && isset($detail['category']['name']) && is_string($detail['category']['name'])) {
+            $label = trim($detail['category']['name']);
+            if ($label !== '') {
+                $categories[] = $this->formatSentence($label);
+            }
+        }
+
+        if (!$categories && isset($listing['category']) && is_string($listing['category'])) {
+            $label = trim($listing['category']);
+            if ($label !== '') {
+                $categories[] = $this->formatSentence($label);
+            }
+        }
+
+        if (!$categories && isset($listing['location_type']) && is_string($listing['location_type'])) {
+            $label = trim(str_replace('_', ' ', $listing['location_type']));
+            if ($label !== '') {
+                $categories[] = $this->formatSentence($label);
+            }
+        }
+
+        $categories = array_values(array_unique(array_filter($categories, static fn ($value) => $value !== '')));
+        return $categories ? implode(' • ', $categories) : '';
+    }
+
+    /**
+     * @param array<string, mixed> $listing
+     * @param array<string, mixed> $detail
+     */
+    private function extractTripAdvisorPrice(array $listing, array $detail): string
+    {
+        foreach ([
+            $detail['price_level'] ?? null,
+            $detail['price'] ?? null,
+            $listing['price_level'] ?? null,
+            $listing['price'] ?? null,
+        ] as $value) {
+            if (is_string($value)) {
+                $trimmed = trim($value);
+                if ($trimmed !== '') {
+                    return $trimmed;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @param array<string, mixed> $source
+     * @return array<string, mixed>
+     */
+    private function filterTripAdvisorSource(array $source): array
+    {
+        return array_filter($source, static function ($value) {
+            if ($value === null) {
+                return false;
+            }
+            if (is_string($value)) {
+                return trim($value) !== '';
+            }
+            return true;
+        });
+    }
+
+    /**
+     * @param array<int, mixed> $values
+     */
+    private function coalesceString(array $values): string
+    {
+        foreach ($values as $value) {
+            if (is_string($value)) {
+                $trimmed = trim($value);
+                if ($trimmed !== '') {
+                    return $trimmed;
+                }
+            } elseif (is_numeric($value)) {
+                $stringValue = trim((string) $value);
+                if ($stringValue !== '') {
+                    return $stringValue;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /**
      * @param array<string, mixed>|null $detail
      * @return array<string, mixed>|null
      */
@@ -433,6 +876,23 @@ final class LiveDataClient
         }, explode(',', $kinds)));
 
         return $parts ? implode(' • ', $parts) : '';
+    }
+
+    private function distanceInKilometers(float $lat1, float $lon1, float $lat2, float $lon2): float
+    {
+        $earthRadius = 6371.0;
+        $lat1 = deg2rad($lat1);
+        $lon1 = deg2rad($lon1);
+        $lat2 = deg2rad($lat2);
+        $lon2 = deg2rad($lon2);
+
+        $deltaLat = $lat2 - $lat1;
+        $deltaLon = $lon2 - $lon1;
+
+        $a = sin($deltaLat / 2) ** 2 + cos($lat1) * cos($lat2) * sin($deltaLon / 2) ** 2;
+        $c = 2 * atan2(sqrt($a), sqrt(max(0.0, 1 - $a)));
+
+        return $earthRadius * $c;
     }
 
     private function nameSimilarity(string $a, string $b): float
