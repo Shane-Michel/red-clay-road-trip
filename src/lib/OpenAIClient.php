@@ -17,7 +17,7 @@ final class OpenAIClient
     /** @var string */
     private $model;
 
-    public function __construct(?string $apiKey = null, string $model = 'gpt-4-nano')
+    public function __construct(?string $apiKey = null, string $model = 'gpt-4.1-nano')
     {
         // Prefer explicit API key; otherwise read from environment
         if ($apiKey === null) {
