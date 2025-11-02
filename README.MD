@@ -74,6 +74,7 @@ The first request will automatically create the SQLite database at `data/trips.s
 - The OpenAI call requests a JSON schema ensuring the response matches what the UI expects.
 - All dates are stored in UTC ISO-8601 format for consistency.
 - Front-end code is located in `assets/js/app.js` and `assets/css/style.css`.
+- The end-to-end itinerary pipeline is expected to follow a data-grounded flow: interpret intent, fetch facts from APIs, and let the LLM synthesize only from vetted entities. See [`docs/architecture/data-grounded-itinerary.md`](docs/architecture/data-grounded-itinerary.md) for the recommended orchestration sequence.
 
 ## Deployment
 
