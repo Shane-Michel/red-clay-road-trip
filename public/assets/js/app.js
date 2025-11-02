@@ -21,11 +21,12 @@ const applyEditsButton = document.getElementById('apply-edits');
 const citiesContainer = document.getElementById('cities-of-interest');
 const addCityButton = document.getElementById('add-city');
 const accountStatus = document.getElementById('account-status');
-const accountKeyInput = document.getElementById('account-key');
-const accountApplyButton = document.getElementById('account-apply');
-const accountGenerateButton = document.getElementById('account-generate');
-const accountCopyButton = document.getElementById('account-copy');
-const accountResetButton = document.getElementById('account-reset');
+const accountForm = document.getElementById('account-form');
+const accountEmailInput = document.getElementById('account-email');
+const accountPasswordInput = document.getElementById('account-password');
+const accountLoginButton = document.getElementById('account-login');
+const accountRegisterButton = document.getElementById('account-register');
+const accountLogoutButton = document.getElementById('account-logout');
 const startLocationInput = document.getElementById('start_location');
 const useCurrentLocationButton = document.getElementById('use-current-location');
 const startLocationStatus = document.getElementById('start-location-status');
@@ -477,111 +478,199 @@ async function requestItinerary(serializedPayload, { attempts = 3, baseDelayMs =
   throw lastError || new Error('Failed to contact the itinerary service.');
 }
 
-/* -------------------------- User scope management ----------------------- */
+/* -------------------------- Authentication management ------------------- */
 
-const travelerScope = (() => {
-  const STORAGE_KEY = 'redclay.travelerKey';
-  let stored = '';
-  try {
-    stored = window.localStorage ? window.localStorage.getItem(STORAGE_KEY) : '';
-  } catch (error) {
-    console.warn('Unable to read traveler scope', error);
-  }
-  let current = sanitize(stored);
+const accountLoginDefaultLabel = accountLoginButton
+  ? (accountLoginButton.textContent || '').trim() || 'Sign in'
+  : 'Sign in';
+const accountRegisterDefaultLabel = accountRegisterButton
+  ? (accountRegisterButton.textContent || '').trim() || 'Create account'
+  : 'Create account';
+const accountLogoutDefaultLabel = accountLogoutButton
+  ? (accountLogoutButton.textContent || '').trim() || 'Sign out'
+  : 'Sign out';
+
+const auth = (() => {
+  let currentUser = null;
+  let initialized = false;
   const listeners = new Set();
-
-  function sanitize(value) {
-    if (value == null) return '';
-    const trimmed = String(value).trim();
-    if (!trimmed) return '';
-    const withoutBreaks = trimmed.replace(/\s+/g, ' ');
-    const filtered = withoutBreaks.replace(/[^A-Za-z0-9@._-]/g, '');
-    return filtered.slice(0, 120);
-  }
-
-  function persist() {
-    try {
-      if (current) window.localStorage.setItem(STORAGE_KEY, current);
-      else window.localStorage.removeItem(STORAGE_KEY);
-    } catch (error) {
-      console.warn('Unable to persist traveler scope', error);
-    }
-  }
 
   function notify() {
     listeners.forEach((listener) => {
       try {
-        listener(current);
+        listener(currentUser, initialized);
       } catch (error) {
-        console.error('travelerScope listener error', error);
+        console.error('auth listener error', error);
       }
     });
   }
 
-  function set(value) {
-    current = sanitize(value);
-    persist();
+  async function refresh() {
+    try {
+      const data = await fetchJSON('api/auth_status.php');
+      if (data && typeof data === 'object' && data.authenticated && data.user) {
+        currentUser = {
+          email: String(data.user.email ?? ''),
+          created_at: String(data.user.created_at ?? ''),
+          scope: typeof data.scope === 'string' && data.scope ? data.scope : 'public',
+        };
+      } else {
+        currentUser = null;
+      }
+    } catch (error) {
+      console.warn('Unable to load auth status', error);
+      currentUser = null;
+    } finally {
+      initialized = true;
+      notify();
+    }
+  }
+
+  async function login(email, password) {
+    const payload = { email, password };
+    const data = await fetchJSON('api/login.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (data && typeof data === 'object' && data.user) {
+      currentUser = {
+        email: String(data.user.email ?? ''),
+        created_at: String(data.user.created_at ?? ''),
+        scope: typeof data.scope === 'string' && data.scope ? data.scope : 'public',
+      };
+    } else {
+      currentUser = null;
+    }
+    initialized = true;
     notify();
-    return current;
+    return currentUser;
+  }
+
+  async function register(email, password) {
+    const payload = { email, password };
+    const data = await fetchJSON('api/register.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (data && typeof data === 'object' && data.user) {
+      currentUser = {
+        email: String(data.user.email ?? ''),
+        created_at: String(data.user.created_at ?? ''),
+        scope: typeof data.scope === 'string' && data.scope ? data.scope : 'public',
+      };
+    } else {
+      currentUser = null;
+    }
+    initialized = true;
+    notify();
+    return currentUser;
+  }
+
+  async function logout() {
+    await fetchJSON('api/logout.php', { method: 'POST' });
+    currentUser = null;
+    initialized = true;
+    notify();
+  }
+
+  function onChange(listener) {
+    if (typeof listener !== 'function') return () => {};
+    listeners.add(listener);
+    if (initialized) {
+      try {
+        listener(currentUser, initialized);
+      } catch (error) {
+        console.error('auth listener error', error);
+      }
+    }
+    return () => listeners.delete(listener);
   }
 
   return {
-    current: () => current,
-    isDefault: () => current === '',
-    set,
-    clear: () => set(''),
-    generate: () => {
-      const base = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random()}`;
-      const cleaned = base.replace(/[^a-z0-9]/gi, '').toLowerCase();
-      const padded = cleaned.padEnd(24, 'x');
-      return `rc${padded}`.slice(0, 40);
-    },
-    decorate: (options = {}) => {
-      const opts = { ...options };
-      const headers = new Headers(options && options.headers ? options.headers : undefined);
-      if (current) headers.set('X-User-Scope', current);
-      opts.headers = headers;
-      return opts;
-    },
-    onChange: (listener) => {
-      if (typeof listener !== 'function') return () => {};
-      listeners.add(listener);
-      listener(current);
-      return () => listeners.delete(listener);
-    },
+    refresh,
+    login,
+    register,
+    logout,
+    onChange,
+    user: () => currentUser,
+    isAuthenticated: () => currentUser != null,
+    isReady: () => initialized,
+    cacheKey: () => (currentUser && currentUser.email ? `user:${currentUser.email}` : 'guest'),
+    scope: () => (currentUser && currentUser.scope ? currentUser.scope : 'public'),
   };
 })();
 
 let accountAnnouncement = '';
+let accountAnnouncementIsError = false;
 let accountAnnouncementTimeout = null;
+let lastAccountUser = null;
 
-function updateAccountStatus(key) {
+function updateAccountStatus(user) {
   if (!accountStatus) return;
 
+  const isAuthenticated = Boolean(user && user.email);
+  const wasAuthenticated = Boolean(lastAccountUser && lastAccountUser.email);
+
+  if (accountEmailInput) {
+    if (isAuthenticated) {
+      accountEmailInput.value = String(user.email ?? '');
+      accountEmailInput.readOnly = true;
+      accountEmailInput.disabled = true;
+    } else {
+      if (wasAuthenticated) accountEmailInput.value = '';
+      accountEmailInput.readOnly = false;
+      accountEmailInput.disabled = false;
+    }
+  }
+
+  if (accountPasswordInput) {
+    accountPasswordInput.value = '';
+    accountPasswordInput.disabled = isAuthenticated;
+  }
+
+  if (accountLoginButton) {
+    if (isAuthenticated) {
+      accountLoginButton.disabled = true;
+      accountLoginButton.textContent = 'Signed in';
+    } else {
+      accountLoginButton.disabled = false;
+      accountLoginButton.textContent = accountLoginDefaultLabel;
+    }
+  }
+
+  if (accountRegisterButton) {
+    accountRegisterButton.hidden = isAuthenticated;
+    accountRegisterButton.disabled = isAuthenticated;
+    if (!isAuthenticated) accountRegisterButton.textContent = accountRegisterDefaultLabel;
+  }
+
+  if (accountLogoutButton) {
+    accountLogoutButton.hidden = !isAuthenticated;
+    accountLogoutButton.disabled = false;
+    accountLogoutButton.textContent = accountLogoutDefaultLabel;
+  }
+
   let base;
-  if (!key) {
-    base = `<span>${escapeHtml('Currently using the shared demo space. Saved trips here are visible to other visitors.')}</span>`;
-    if (accountKeyInput) accountKeyInput.value = '';
-    if (accountCopyButton) accountCopyButton.hidden = true;
-    if (accountResetButton) accountResetButton.disabled = true;
+  if (isAuthenticated) {
+    const email = String(user.email ?? '');
+    base = `<span>Signed in as <strong>${escapeHtml(email)}</strong>. Trips you save are private to this account.</span>`;
   } else {
-    const masked = key.length > 12 ? `${key.slice(0, 6)}…${key.slice(-4)}` : key;
-    base = `<span>Private key active (<code>${escapeHtml(masked)}</code>). Trips saved now are isolated to this key.</span>`;
-    if (accountKeyInput) accountKeyInput.value = key;
-    if (accountCopyButton) accountCopyButton.hidden = false;
-    if (accountResetButton) accountResetButton.disabled = false;
+    base = `<span>${escapeHtml('Currently using the shared demo space. Sign in to keep your itineraries private across devices.')}</span>`;
   }
 
   const message = accountAnnouncement
-    ? `<span class="account__announcement">${escapeHtml(accountAnnouncement)}</span>`
+    ? `<span class="account__announcement${accountAnnouncementIsError ? ' account__announcement--error' : ''}">${escapeHtml(accountAnnouncement)}</span>`
     : '';
   accountStatus.innerHTML = `${base}${message}`;
+
+  lastAccountUser = isAuthenticated ? { email: String(user.email ?? '') } : null;
 }
 
-function announceAccount(message) {
+function announceAccount(message, { error = false } = {}) {
   accountAnnouncement = message || '';
+  accountAnnouncementIsError = Boolean(error);
   if (accountAnnouncementTimeout) {
     clearTimeout(accountAnnouncementTimeout);
     accountAnnouncementTimeout = null;
@@ -589,14 +678,121 @@ function announceAccount(message) {
   if (accountAnnouncement) {
     accountAnnouncementTimeout = setTimeout(() => {
       accountAnnouncement = '';
-      updateAccountStatus(travelerScope.current());
+      accountAnnouncementIsError = false;
+      accountAnnouncementTimeout = null;
+      updateAccountStatus(auth.user());
     }, 5000);
   }
-  updateAccountStatus(travelerScope.current());
+  updateAccountStatus(auth.user());
+}
+
+function setAuthLoading(isLoading) {
+  const busy = Boolean(isLoading);
+
+  if (!auth.isAuthenticated()) {
+    if (accountEmailInput) accountEmailInput.disabled = busy;
+    if (accountPasswordInput) accountPasswordInput.disabled = busy;
+  }
+
+  if (accountLoginButton) {
+    if (!auth.isAuthenticated()) {
+      accountLoginButton.disabled = busy;
+      accountLoginButton.textContent = busy ? 'Signing in…' : accountLoginDefaultLabel;
+    } else {
+      accountLoginButton.disabled = true;
+      accountLoginButton.textContent = 'Signed in';
+    }
+  }
+
+  if (accountRegisterButton) {
+    if (!auth.isAuthenticated()) {
+      accountRegisterButton.disabled = busy;
+      accountRegisterButton.textContent = busy ? 'Creating…' : accountRegisterDefaultLabel;
+    } else {
+      accountRegisterButton.disabled = true;
+      accountRegisterButton.hidden = true;
+    }
+  }
+
+  if (accountLogoutButton) {
+    accountLogoutButton.disabled = busy;
+    accountLogoutButton.textContent = busy ? 'Working…' : accountLogoutDefaultLabel;
+  }
+
+  if (accountForm) {
+    accountForm.classList.toggle('account--loading', busy);
+  }
+}
+
+async function handleLogin() {
+  if (!accountEmailInput || !accountPasswordInput) return;
+  const email = (accountEmailInput.value || '').trim();
+  const password = accountPasswordInput.value || '';
+
+  if (!email || !password) {
+    announceAccount('Enter your email and password to sign in.', { error: true });
+    return;
+  }
+
+  setAuthLoading(true);
+  try {
+    await auth.login(email, password);
+    announceAccount('Signed in successfully.');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to sign in right now.';
+    announceAccount(message, { error: true });
+  } finally {
+    setAuthLoading(false);
+  }
+}
+
+async function handleRegister() {
+  if (!accountEmailInput || !accountPasswordInput) return;
+  const email = (accountEmailInput.value || '').trim();
+  const password = accountPasswordInput.value || '';
+
+  if (!email) {
+    announceAccount('Enter an email address to create an account.', { error: true });
+    return;
+  }
+
+  if (password.length < 8) {
+    announceAccount('Password must be at least 8 characters long.', { error: true });
+    return;
+  }
+
+  setAuthLoading(true);
+  try {
+    await auth.register(email, password);
+    announceAccount('Account created and signed in.');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to create an account right now.';
+    announceAccount(message, { error: true });
+  } finally {
+    setAuthLoading(false);
+  }
+}
+
+async function handleLogout() {
+  setAuthLoading(true);
+  try {
+    await auth.logout();
+    announceAccount('Signed out. Using the shared demo space.');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to sign out right now.';
+    announceAccount(message, { error: true });
+  } finally {
+    setAuthLoading(false);
+  }
 }
 
 async function fetchJSON(url, options = {}) {
-  const response = await fetch(url, travelerScope.decorate(options));
+  const opts = { credentials: 'same-origin', ...options };
+  const headers = new Headers(options && options.headers ? options.headers : undefined);
+  if (!headers.has('Accept')) headers.set('Accept', 'application/json');
+  opts.headers = headers;
+
+  const response = await fetch(url, opts);
   const contentType = response.headers.get('content-type') || '';
 
   let parsed = null;
@@ -1505,9 +1701,9 @@ function renderHistory(trips) {
   historyList.innerHTML = '';
 
   if (!Array.isArray(trips) || trips.length === 0) {
-    const message = travelerScope.isDefault()
+    const message = auth.isAuthenticated()
       ? 'No trips saved yet. Generate one to get started!'
-      : 'No trips saved for this key yet. Save a trip to see it here.';
+      : 'No trips saved yet. Trips here are shared with other visitors.';
     historyList.innerHTML = `<p>${escapeHtml(message)}</p>`;
     return;
   }
@@ -1535,9 +1731,9 @@ async function loadHistory() {
   } catch (e) {
     console.error(e);
     if (historyList) {
-      const message = travelerScope.isDefault()
-        ? 'Unable to load saved trips. Please try again later.'
-        : 'Unable to load trips for this key. Please try again later.';
+      const message = auth.isAuthenticated()
+        ? 'Unable to load your saved trips. Please try again later.'
+        : 'Unable to load shared trips right now. Please try again later.';
       historyList.innerHTML = `<p>${escapeHtml(message)}</p>`;
     }
   }
@@ -1545,98 +1741,47 @@ async function loadHistory() {
 
 /* ----------------------------- Event wiring ---------------------------- */
 
-let scopeInitialized = false;
-travelerScope.onChange((key) => {
-  updateAccountStatus(key);
-  if (scopeInitialized) {
+updateAccountStatus(null);
+
+auth.onChange((user, ready) => {
+  updateAccountStatus(user);
+  if (ready) {
     loadHistory();
-  } else {
-    scopeInitialized = true;
   }
 });
 
-if (accountGenerateButton) {
-  accountGenerateButton.addEventListener('click', async () => {
-    const newKey = travelerScope.generate();
-    const applied = travelerScope.set(newKey);
-    if (accountKeyInput) {
-      accountKeyInput.focus();
-      accountKeyInput.select();
-    }
+auth.refresh();
 
-    if (
-      applied
-      && typeof navigator !== 'undefined'
-      && navigator.clipboard
-      && typeof navigator.clipboard.writeText === 'function'
-    ) {
-      try {
-        await navigator.clipboard.writeText(applied);
-        announceAccount('Generated a new private key and copied it to your clipboard.');
-        return;
-      } catch (error) {
-        console.warn('Unable to copy private key automatically', error);
-      }
-    }
-
-    announceAccount('Generated a new private key. Copy it somewhere safe.');
-  });
-}
-
-if (accountApplyButton) {
-  accountApplyButton.addEventListener('click', () => {
-    const value = accountKeyInput ? accountKeyInput.value : '';
-    const applied = travelerScope.set(value);
-    if (!applied) announceAccount('Using the shared demo space.');
-    else announceAccount('Private key applied. History will refresh.');
-  });
-}
-
-if (accountResetButton) {
-  accountResetButton.addEventListener('click', () => {
-    if (travelerScope.isDefault()) {
-      announceAccount('Already using the shared demo space.');
+if (accountForm) {
+  accountForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (auth.isAuthenticated()) {
+      announceAccount('Already signed in.');
       return;
     }
-    travelerScope.clear();
-    if (accountKeyInput) accountKeyInput.value = '';
-    announceAccount('Switched back to the shared demo space.');
+    handleLogin();
   });
 }
 
-if (accountCopyButton) {
-  accountCopyButton.addEventListener('click', async () => {
-    const key = travelerScope.current();
-    if (!key) {
-      announceAccount('No private key to copy yet.');
+if (accountRegisterButton) {
+  accountRegisterButton.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (auth.isAuthenticated()) {
+      announceAccount('Already signed in.');
       return;
     }
-
-    if (
-      typeof navigator === 'undefined'
-      || !navigator.clipboard
-      || typeof navigator.clipboard.writeText !== 'function'
-    ) {
-      announceAccount('Clipboard access unavailable. Select the key and copy it manually.');
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(key);
-      announceAccount('Private key copied to clipboard.');
-    } catch (error) {
-      console.warn('Clipboard write failed', error);
-      announceAccount('Unable to copy automatically. Select and copy the key manually.');
-    }
+    handleRegister();
   });
 }
 
-if (accountKeyInput) {
-  accountKeyInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      if (accountApplyButton) accountApplyButton.click();
+if (accountLogoutButton) {
+  accountLogoutButton.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (!auth.isAuthenticated()) {
+      announceAccount('You are already using the shared demo space.');
+      return;
     }
+    handleLogout();
   });
 }
 
@@ -1770,8 +1915,7 @@ if (form) {
     event.preventDefault();
     const formData = new FormData(form);
     const serialized = serializeFormData(formData);
-    const scopeKey = travelerScope.current() || 'public';
-    const cacheKey = stableStringify({ scope: scopeKey, payload: serialized });
+    const cacheKey = stableStringify({ scope: auth.cacheKey(), payload: serialized });
 
     if (saveButton) saveButton.disabled = true;
     if (resultsSection) resultsSection.hidden = true;
