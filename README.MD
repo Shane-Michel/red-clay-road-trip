@@ -5,6 +5,7 @@ Red Clay Road Trip is a single-page web experience that builds an AI-assisted ad
 ## Features
 
 - **AI-generated itineraries** powered by the OpenAI Responses API and tuned for the `gpt-4-nano` model by default.
+- **Data-grounded orchestration** that normalizes intent, expands preferences, fetches live TripAdvisor/OpenTripMap/Weather data, and lets the LLM narrate only from verified facts.
 - **Rich client experience** with a responsive layout, dark-mode support, and dynamic rendering.
 - **Trip history** stored locally in SQLite so returning visitors can revisit or reload previous adventures.
 - **Beyond history**: every stop now includes fun facts, can't-miss highlights, and hidden bites in addition to contextual stories.
