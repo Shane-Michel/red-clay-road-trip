@@ -107,6 +107,19 @@ body {
     font-weight: 600;
 }
 
+.account__announcement--error {
+    color: #b33a3a;
+}
+
+.account--loading {
+    opacity: 0.65;
+}
+
+.account--loading input,
+.account--loading button {
+    pointer-events: none;
+}
+
 @media (max-width: 768px) {
     .account {
         margin-top: -2.5rem;
