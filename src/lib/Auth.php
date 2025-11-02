@@ -150,13 +150,27 @@ final class Auth
         if (session_status() === PHP_SESSION_ACTIVE) {
             if (ini_get('session.use_cookies')) {
                 $params = session_get_cookie_params();
-                setcookie(session_name(), '', time() - 42000, [
-                    'path' => $params['path'] ?? '/',
-                    'domain' => $params['domain'] ?? '',
-                    'secure' => $params['secure'] ?? false,
-                    'httponly' => $params['httponly'] ?? true,
-                    'samesite' => $params['samesite'] ?? 'Lax',
-                ]);
+                $expires = time() - 42000;
+                if (PHP_VERSION_ID >= 70300) {
+                    setcookie(session_name(), '', [
+                        'expires' => $expires,
+                        'path' => $params['path'] ?? '/',
+                        'domain' => $params['domain'] ?? '',
+                        'secure' => $params['secure'] ?? false,
+                        'httponly' => $params['httponly'] ?? true,
+                        'samesite' => $params['samesite'] ?? 'Lax',
+                    ]);
+                } else {
+                    setcookie(
+                        session_name(),
+                        '',
+                        $expires,
+                        $params['path'] ?? '/',
+                        $params['domain'] ?? '',
+                        $params['secure'] ?? false,
+                        $params['httponly'] ?? true
+                    );
+                }
             }
             session_destroy();
         }
